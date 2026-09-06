@@ -12,13 +12,13 @@ See [`PLAN.md`](PLAN.md) for the full design and roadmap, and
 
 ## Status
 
-**Phase 5 — packet crafting & transmission.** On top of Phases 0-4 (capture, stylized
-GUI, rule engine + NFQUEUE, userspace bridge, interactive intercept), the tool now has a
-visual packet builder: stack layers from a palette (Ether/VLAN/ARP/IP/IPv6/ICMP/TCP/UDP/
-DNS/Raw), edit every header and data field, preview the built bytes live, and send one-shot,
-looped, or send-and-receive. Load a captured packet straight into the builder to edit and
-resend, and save/load templates. Checksums/lengths auto-compute unless overridden. Verified
-live: a crafted packet sent on one veth arrives intact on its peer.
+**Phase 6 — diagnostics & troubleshooting.** On top of Phases 0-5 (capture, stylized GUI,
+rule engine + NFQUEUE, userspace bridge, interactive intercept, packet crafting), the tool
+now has a Diagnostics tab so the operator can find and fix problems without leaving the app:
+a Doctor self-check panel, a live Health dashboard (counters + rates), a packet-path Tracer
+that explains why each rule did/didn't fire on a selected packet, an end-to-end pipeline
+Self-test, a Logs viewer with one-click diagnostic-bundle export, and a searchable offline
+Knowledge base of common inline-tool pitfalls. Next: advanced protocols & fuzzing (Phase 7).
 
 Run the bridge headless:
 

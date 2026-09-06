@@ -40,6 +40,7 @@ from reforge.core.intercept import InterceptQueue
 from reforge.core.packet import Packet
 from reforge.gui import theme
 from reforge.gui.builder_panel import BuilderPanel
+from reforge.gui.diagnostics_panel import DiagnosticsPanel
 from reforge.gui.intercept_panel import InterceptPanel
 from reforge.gui.rules_panel import RulesPanel
 
@@ -208,7 +209,21 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(center, "Capture")
         self.builder_panel = BuilderPanel(get_selected_packet=self._selected_packet_bytes)
         self.tabs.addTab(self.builder_panel, "Builder")
+        self.diag_panel = DiagnosticsPanel(
+            get_selected_packet=self._selected_packet_bytes,
+            build_engine=lambda: self.rules_panel.build_engine(dry_run=False),
+            get_service=lambda: self.service,
+            get_bridge_ifaces=self._bridge_ifaces,
+            get_rule_specs=lambda: self.rules_panel.specs,
+        )
+        self.tabs.addTab(self.diag_panel, "Diagnostics")
         self.setCentralWidget(self.tabs)
+
+    def _bridge_ifaces(self) -> list[str]:
+        if self.mode_combo.currentText() != "Bridge":
+            return []
+        return [i for i in (self.iface_combo.currentText(), self.peer_combo.currentText())
+                if i and i != "<none>"]
 
     def _selected_packet_bytes(self) -> bytes | None:
         rows = self.table.selectionModel().selectedRows()
@@ -341,6 +356,7 @@ class MainWindow(QMainWindow):
             return
         if self.intercept is not None:
             self.intercept_panel.refresh_pending()
+        self.diag_panel.refresh_health()
         n = self._flush_rows()
         if n == 0 and not self.service.running:
             self.stop_capture()
