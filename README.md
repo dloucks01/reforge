@@ -12,13 +12,16 @@ See [`PLAN.md`](PLAN.md) for the full design and roadmap, and
 
 ## Status
 
-**Phase 7 — advanced protocols & logic.** On top of Phases 0-6, the tool now handles
-proprietary and advanced traffic: define a custom protocol from a declarative field spec
-and it becomes a first-class layer (auto-dissected, matchable, editable, buildable) — ideal
-for ICS/OT and proprietary formats; fuzz matched packets inline or fuzz-send mutated variants
-from the builder; extend the engine with Python plugins (operator-authored transforms usable
-as rule actions, plus protocol registration); and keep TCP flows in sync after length-changing
-edits with a sequence/ack fixer. Next: performance backends & airgap packaging (Phase 8).
+**Phase 8 — performance backends & no-install packaging (final phase).** On top of
+Phases 0-7, the capture ladder now has AF_XDP/PF_RING/DPDK backends behind the same
+interface with real host-capability detection (`reforge backends` reports what's usable),
+a backend recommender by link speed, and a tuning module (hugepages, CPU/IRQ affinity, NIC
+queues). Reforge is delivered as a **self-contained tarball** — copy it to the airgapped
+target, extract, and run `./reforge`; the Python runtime, Scapy, and PySide6/Qt are bundled,
+so nothing is installed. Build with `packaging/build_bundle.sh`; deploy per `docs/DEPLOYMENT.md`.
+
+> The high-rate data planes need a compiled fast-path component per deployment; without it
+> Reforge runs on AF_PACKET and reports what's missing. All eight roadmap phases are complete.
 
 Run the bridge headless:
 

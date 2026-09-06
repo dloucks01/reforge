@@ -9,22 +9,43 @@ from __future__ import annotations
 from reforge.capture.afpacket import AfPacketBackend
 from reforge.capture.base import CaptureBackend
 from reforge.capture.pcap import PcapFileBackend
+from reforge.capture.perf_backends import AfXdpBackend, DpdkBackend, PfRingBackend
 
 # Ordered from most-compatible to fastest. AF_PACKET (live) and pcap (offline)
-# are implemented; the rest are registered as placeholders so the ladder is
-# visible in the UI and Doctor.
+# have full data planes; the performance backends detect host capability and
+# need the fast-path component to actually run (see docs/DEPLOYMENT.md).
 _REGISTRY: list[type[CaptureBackend]] = [
     AfPacketBackend,
     PcapFileBackend,
+    AfXdpBackend,
+    PfRingBackend,
+    DpdkBackend,
 ]
 
-# Names of backends planned but not yet implemented (shown as unavailable).
 _PLANNED = [
-    ("af_xdp", "AF_XDP zero-copy (Phase 8) — 10-40G, needs XDP-capable driver"),
-    ("pf_ring", "PF_RING ZC (Phase 8) — 10-100G, needs PF_RING modules"),
-    ("dpdk", "DPDK poll-mode (Phase 8) — 100G, hugepages + NIC binding"),
     ("nfqueue", "NFQUEUE kernel path (Phase 2) — gateway/bridged L3-L7"),
 ]
+
+# Rough speed ceilings (Mbps) per backend, for recommend_backend().
+_SPEED_CEILING = {"af_packet": 2000, "af_xdp": 40000, "pf_ring": 100000, "dpdk": 100000}
+
+
+def recommend_backend(link_mbps: int) -> str:
+    """Pick the most-compatible backend that can plausibly carry `link_mbps`.
+
+    Prefers AF_PACKET when it's fast enough (no special setup), stepping up to
+    faster backends only when the link demands it and the host supports them.
+    """
+    order = ["af_packet", "af_xdp", "pf_ring", "dpdk"]
+    available = {name for name, ok, _ in list_backends() if ok}
+    for name in order:
+        if _SPEED_CEILING.get(name, 0) >= link_mbps and name in available:
+            return name
+    # nothing available meets the rate; return the fastest available, else af_packet
+    for name in reversed(order):
+        if name in available:
+            return name
+    return "af_packet"
 
 
 def list_interfaces() -> list[str]:

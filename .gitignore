@@ -14,3 +14,10 @@ venv/
 .reforge.json
 *.AppImage
 AppDir/
+
+# Phase 8 bundle build artifacts
+/build/
+/dist/
+*.tar.gz
+*.tar.gz.sha256
+reforge-*-linux-*
