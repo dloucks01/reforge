@@ -55,13 +55,14 @@ def test_open_pcap_loads_and_autostops(app, tmp_path):
     from scapy.utils import wrpcap
 
     from reforge.capture.pcap import PcapFileBackend
+    from reforge.core.capture_service import CaptureService
     from reforge.gui.main_window import MainWindow
 
     path = tmp_path / "e2e.pcap"
     wrpcap(str(path), [Ether() / IP(dst=f"10.0.0.{i}") / UDP(dport=53) for i in range(8)])
 
     win = MainWindow()
-    win._start(PcapFileBackend(str(path)), "pcap e2e")
+    win._start_service(CaptureService(PcapFileBackend(str(path))), "pcap e2e")
     for _ in range(50):  # pump the timer manually
         win._drain()
         if win.service is None:  # auto-stopped

@@ -12,12 +12,22 @@ See [`PLAN.md`](PLAN.md) for the full design and roadmap, and
 
 ## Status
 
-**Phase 2 — rule engine + NFQUEUE inline path.** On top of Phase 0 foundations and
-Phase 1 live/offline capture with a stylized dark/light GUI, the tool now has a
-match→action rule engine (field rewrite, payload replace, drop, delay, duplicate) with
-automatic checksum/length recompute, a dry-run/shadow mode you can run over a capture
-from the GUI Rules panel, and an NFQUEUE runner for real inline enforcement. Next:
-the userspace transparent bridge (Phase 3).
+**Phase 3 — userspace transparent bridge.** On top of Phases 0-2 (foundations, live/
+offline capture with a stylized dark/light GUI, and the match→action rule engine with
+NFQUEUE), the tool now has a real dual-NIC userspace bridge: it forwards traffic inline
+between two interfaces, manipulates it at L2-L7 through the rule engine, and is protected
+by a watchdog with a fail-open (kernel-bridge fallback) or fail-closed policy. Interface
+prep (offload disable, promiscuous/allmulti, host-stack suppression) and teardown are
+idempotent and self-reverting. Verified end-to-end in the netns lab: pass-through
+forwarding (including ARP/broadcast) and an inline ICMP-drop rule. Next: the interactive
+intercept & edit queue (Phase 4).
+
+Run the bridge headless:
+
+```bash
+sudo python3 -m reforge bridge --a eth0 --b eth1            # fail-open (default)
+sudo python3 -m reforge bridge --a eth0 --b eth1 --session engagement.reforge.json
+```
 
 ## Quick start (dev)
 

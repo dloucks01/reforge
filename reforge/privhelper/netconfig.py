@@ -78,6 +78,67 @@ def prepare_capture_iface(iface: str, journal: RevertJournal, apply: bool = Fals
     return planned
 
 
+def prepare_bridge(if_a: str, if_b: str, journal: RevertJournal,
+                   apply: bool = False) -> list[list[str]]:
+    """Prepare BOTH interfaces for a userspace transparent bridge.
+
+    Each interface: offloads off, promisc + allmulti, no IP; plus host-stack
+    suppression so the kernel doesn't answer traffic crossing the bridge. The
+    journal captures every undo for a clean revert.
+    """
+    planned: list[list[str]] = []
+    for iface in (if_a, if_b):
+        planned += prepare_capture_iface(iface, journal, apply=apply)
+        planned += suppress_host_stack(iface, journal, apply=apply)
+    return planned
+
+
+FAIL_BRIDGE = "reforge-fo0"
+
+
+def fail_open_commands(if_a: str, if_b: str, journal: RevertJournal,
+                       apply: bool = False) -> list[list[str]]:
+    """Kernel-bridge fallback so traffic keeps flowing if the app stops.
+
+    Joins both NICs into a plain kernel bridge (unmanipulated pass-through).
+    On a bypass-capable NIC this would instead switch the card to Bypass mode.
+    """
+    planned = [
+        ["ip", "link", "add", "name", FAIL_BRIDGE, "type", "bridge"],
+        ["ip", "link", "set", if_a, "master", FAIL_BRIDGE],
+        ["ip", "link", "set", if_b, "master", FAIL_BRIDGE],
+        ["ip", "link", "set", FAIL_BRIDGE, "up"],
+    ]
+    journal.record(["ip", "link", "set", if_a, "nomaster"])
+    journal.record(["ip", "link", "set", if_b, "nomaster"])
+    journal.record(["ip", "link", "del", FAIL_BRIDGE])
+    if apply:
+        for cmd in planned:
+            _run(cmd)
+    else:
+        for cmd in planned:
+            log.info("[plan] %s", " ".join(cmd))
+    return planned
+
+
+def fail_closed_commands(if_a: str, if_b: str, journal: RevertJournal,
+                         apply: bool = False) -> list[list[str]]:
+    """Drop both links so nothing passes when the app stops."""
+    planned = [
+        ["ip", "link", "set", if_a, "down"],
+        ["ip", "link", "set", if_b, "down"],
+    ]
+    journal.record(["ip", "link", "set", if_a, "up"])
+    journal.record(["ip", "link", "set", if_b, "up"])
+    if apply:
+        for cmd in planned:
+            _run(cmd)
+    else:
+        for cmd in planned:
+            log.info("[plan] %s", " ".join(cmd))
+    return planned
+
+
 def suppress_host_stack(iface: str, journal: RevertJournal, apply: bool = False) -> list[list[str]]:
     """Stop the host kernel from answering traffic it observes inline.
 

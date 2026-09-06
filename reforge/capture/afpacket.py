@@ -46,7 +46,7 @@ class AfPacketBackend(CaptureBackend):
         return True, "scapy present; AF_PACKET usable with CAP_NET_RAW"
 
     def open(self) -> None:
-        from scapy.config import conf
+        from scapy.all import conf
 
         if self._listen is None:
             self._listen = conf.L2listen(iface=self.capture_iface, filter=self.bpf)
@@ -73,7 +73,7 @@ class AfPacketBackend(CaptureBackend):
         return frames
 
     def _sender(self, iface: str):
-        from scapy.config import conf
+        from scapy.all import conf
 
         if iface not in self._senders:
             self._senders[iface] = conf.L2socket(iface=iface)

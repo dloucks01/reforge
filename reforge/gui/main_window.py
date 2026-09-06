@@ -87,10 +87,24 @@ class MainWindow(QMainWindow):
         tb.addWidget(self.sep)
         self._restyle_brand()
 
-        tb.addWidget(QLabel(" Interface: "))
+        tb.addWidget(QLabel(" Mode: "))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Passive", "Bridge"])
+        self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
+        tb.addWidget(self.mode_combo)
+
+        tb.addWidget(QLabel("  Interface: "))
         self.iface_combo = QComboBox()
         self.iface_combo.addItems(list_interfaces() or ["<none>"])
         tb.addWidget(self.iface_combo)
+
+        self.peer_label = QLabel("  Peer: ")
+        tb.addWidget(self.peer_label)
+        self.peer_combo = QComboBox()
+        self.peer_combo.addItems(list_interfaces() or ["<none>"])
+        tb.addWidget(self.peer_combo)
+        self.peer_label.setVisible(False)
+        self.peer_combo.setVisible(False)
 
         tb.addWidget(QLabel("  BPF: "))
         self.bpf_edit = QLineEdit()
@@ -99,7 +113,7 @@ class MainWindow(QMainWindow):
         tb.addWidget(self.bpf_edit)
 
         self.act_start = QAction("Start", self)
-        self.act_start.triggered.connect(self.start_live)
+        self.act_start.triggered.connect(self.on_start)
         tb.addAction(self.act_start)
 
         self.act_stop = QAction("Stop", self)
@@ -189,6 +203,17 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, rules_dock)
 
     # ---- capture control ----------------------------------------------------
+    def _on_mode_changed(self, mode: str) -> None:
+        bridge = mode == "Bridge"
+        self.peer_label.setVisible(bridge)
+        self.peer_combo.setVisible(bridge)
+
+    def on_start(self) -> None:
+        if self.mode_combo.currentText() == "Bridge":
+            self.start_bridge()
+        else:
+            self.start_live()
+
     def start_live(self) -> None:
         iface = self.iface_combo.currentText()
         if iface in ("", "<none>"):
@@ -200,7 +225,20 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Capture error", str(exc))
             return
-        self._start(backend, f"live on {iface}")
+        self._start_service(CaptureService(backend), f"live on {iface}")
+
+    def start_bridge(self) -> None:
+        a, b = self.iface_combo.currentText(), self.peer_combo.currentText()
+        if a in ("", "<none>") or b in ("", "<none>") or a == b:
+            self.statusBar().showMessage("Bridge needs two different interfaces")
+            return
+        from reforge.core.bridge import UserspaceBridge
+
+        engine = self.rules_panel.build_engine(dry_run=False)
+        armed = len([r for r in engine.rules if r.enabled]) > 0
+        bridge = UserspaceBridge(a, b, engine)
+        label = f"bridge {a} <-> {b}" + ("  [ARMED]" if armed else "  [pass-through]")
+        self._start_service(bridge, label)
 
     def open_pcap(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -208,22 +246,23 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
-        self._start(PcapFileBackend(path), f"pcap {path}")
+        self._start_service(CaptureService(PcapFileBackend(path)), f"pcap {path}")
 
-    def _start(self, backend, label: str) -> None:
+    def _start_service(self, service, label: str) -> None:
+        """Start any capture-like service (CaptureService or UserspaceBridge)."""
         self.stop_capture()
         self.clear()
-        self.service = CaptureService(backend)
+        self.service = service
         try:
             self.service.start()
         except Exception as exc:
-            QMessageBox.critical(self, "Capture error", str(exc))
+            QMessageBox.critical(self, "Start error", str(exc))
             self.service = None
             return
         self.timer.start()
         self.act_start.setEnabled(False)
         self.act_stop.setEnabled(True)
-        self.statusBar().showMessage(f"Capturing — {label}")
+        self.statusBar().showMessage(f"Running — {label}")
 
     def stop_capture(self) -> None:
         self.timer.stop()
