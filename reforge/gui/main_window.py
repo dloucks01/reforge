@@ -12,11 +12,13 @@ import datetime as _dt
 import logging
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QFont
+from PySide6.QtGui import QAction, QBrush, QColor, QFont
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QDockWidget,
     QFileDialog,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -30,6 +32,8 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QWidget,
 )
+
+from reforge.gui import theme
 
 from reforge.capture.afpacket import AfPacketBackend
 from reforge.capture.base import Frame
@@ -54,6 +58,9 @@ class MainWindow(QMainWindow):
         self.packets: list[tuple[float, Frame]] = []  # captured (ts, frame)
         self._t0: float | None = None
 
+        self._mono_small = QFont("JetBrains Mono", 11)
+        self._mono_small.setStyleHint(QFont.Monospace)
+
         self._build_toolbar()
         self._build_center()
         self._build_docks()
@@ -69,6 +76,16 @@ class MainWindow(QMainWindow):
         tb = QToolBar("main")
         tb.setMovable(False)
         self.addToolBar(tb)
+
+        brand = QLabel(f"  {APP_NAME}  ")
+        brand.setStyleSheet(
+            f"color: {theme.ACCENT}; font-size: 16px; font-weight: 800;"
+            " letter-spacing: 0.5px;"
+        )
+        tb.addWidget(brand)
+        sep = QLabel("│")
+        sep.setStyleSheet(f"color: {theme.BORDER_LIGHT}; padding: 0 6px;")
+        tb.addWidget(sep)
 
         tb.addWidget(QLabel(" Interface: "))
         self.iface_combo = QComboBox()
@@ -114,12 +131,24 @@ class MainWindow(QMainWindow):
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.verticalHeader().setDefaultSectionSize(24)
+        self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        hdr = self.table.horizontalHeader()
+        hdr.setStretchLastSection(True)   # Info column stretches
+        # Column widths: No | Time | Source | Destination | Proto | Length | Info
+        for col, width in ((0, 64), (1, 110), (2, 160), (3, 160), (4, 90), (5, 78)):
+            self.table.setColumnWidth(col, width)
+        hdr.setSectionResizeMode(0, QHeaderView.Fixed)
+        hdr.setSectionResizeMode(5, QHeaderView.Fixed)
         self.table.itemSelectionChanged.connect(self._on_select)
 
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Field", "Value"])
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setColumnWidth(0, 230)
 
         mono = QFont("monospace")
         mono.setStyleHint(QFont.Monospace)
@@ -236,13 +265,23 @@ class MainWindow(QMainWindow):
             rel = ts - self._t0
             values = [str(idx), f"{rel:.6f}", row.src, row.dst, row.proto,
                       str(row.length), row.info]
+            color = QColor(theme.proto_color(row.proto))
         except Exception as exc:
             values = [str(idx), f"{ts:.6f}", "", "", "malformed", str(len(frame.data)), str(exc)]
+            color = QColor(theme.PROTO_MALFORMED)
 
+        brush = QBrush(color)
+        right = {0, 1, 5}  # numeric columns right-aligned
         r = self.table.rowCount()
         self.table.insertRow(r)
         for c, v in enumerate(values):
-            self.table.setItem(r, c, QTableWidgetItem(v))
+            item = QTableWidgetItem(v)
+            item.setForeground(brush)
+            if c in right:
+                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            if c in (0, 1, 5):
+                item.setFont(self._mono_small)
+            self.table.setItem(r, c, item)
 
     def _on_select(self) -> None:
         rows = self.table.selectionModel().selectedRows()
@@ -258,12 +297,18 @@ class MainWindow(QMainWindow):
         from scapy.layers.l2 import Ether
 
         self.tree.clear()
+        bold = QFont()
+        bold.setBold(True)
         try:
             pkt = Ether(frame.data)
             for layer in scapy_tree.to_tree(pkt):
                 parent = QTreeWidgetItem([layer.name, ""])
+                parent.setFont(0, bold)
+                parent.setForeground(0, QBrush(QColor(theme.proto_color(layer.name))))
                 for f in layer.fields:
-                    parent.addChild(QTreeWidgetItem([f.name, f.human]))
+                    child = QTreeWidgetItem([f.name, f.human])
+                    child.setForeground(0, QBrush(QColor(theme.TEXT_MUTED)))
+                    parent.addChild(child)
                 self.tree.addTopLevelItem(parent)
                 parent.setExpanded(True)
         except Exception as exc:
