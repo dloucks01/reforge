@@ -12,8 +12,12 @@ See [`PLAN.md`](PLAN.md) for the full design and roadmap, and
 
 ## Status
 
-**Phase 0 — foundations.** Interfaces, skeleton pipeline, privileged helper, diagnostics,
-GUI shell, and the test lab are in place. Real capture lands in Phase 1.
+**Phase 2 — rule engine + NFQUEUE inline path.** On top of Phase 0 foundations and
+Phase 1 live/offline capture with a stylized dark/light GUI, the tool now has a
+match→action rule engine (field rewrite, payload replace, drop, delay, duplicate) with
+automatic checksum/length recompute, a dry-run/shadow mode you can run over a capture
+from the GUI Rules panel, and an NFQUEUE runner for real inline enforcement. Next:
+the userspace transparent bridge (Phase 3).
 
 ## Quick start (dev)
 

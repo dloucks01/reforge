@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, field
 
 from reforge.capture.base import CaptureBackend, Frame
-from reforge.core.packet import Packet
+from reforge.core.apply import apply_engine
 from reforge.rules.base import Disposition
 from reforge.rules.engine import RuleEngine
 
@@ -46,21 +46,20 @@ class Pipeline:
     def process_one(self, frame: Frame) -> list[Frame]:
         """Run a single frame through the engine and return frames to send."""
         self.counters.captured += 1
-        pkt = Packet.from_bytes(frame.data, ingress=frame.ingress)
-        verdict = self.engine.evaluate(pkt)
+        res = apply_engine(self.engine, frame.data, ingress=frame.ingress, link="ether")
 
-        if verdict.disposition is Disposition.DROP:
+        if res.disposition is Disposition.DROP:
             self.counters.dropped += 1
             return []
-        if verdict.disposition is Disposition.HOLD:
+        if res.disposition is Disposition.HOLD:
             self.counters.held += 1
             return []  # goes to the interception queue (Phase 4)
 
-        out = [Frame(data=pkt.rebuild(), ingress=frame.ingress, meta=frame.meta)]
-        if pkt.modified:
+        out = [Frame(data=res.out, ingress=frame.ingress, meta=frame.meta)]
+        if res.modified:
             self.counters.modified += 1
-        for extra in verdict.extra_sends:
-            out.append(Frame(data=extra.rebuild(), ingress=frame.ingress))
+        for extra in res.extra:
+            out.append(Frame(data=extra, ingress=frame.ingress))
             self.counters.injected += 1
         self.counters.forwarded += len(out)
         return out

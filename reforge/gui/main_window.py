@@ -35,7 +35,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from reforge.core.packet import Packet
 from reforge.gui import theme
+from reforge.gui.rules_panel import RulesPanel
 
 from reforge.capture.afpacket import AfPacketBackend
 from reforge.capture.base import Frame
@@ -180,6 +182,11 @@ class MainWindow(QMainWindow):
         session_tree.setHeaderLabels(["Session"])
         left.setWidget(session_tree)
         self.addDockWidget(Qt.LeftDockWidgetArea, left)
+
+        rules_dock = QDockWidget("Rules", self)
+        self.rules_panel = RulesPanel(on_dry_run=self._dry_run_over_capture)
+        rules_dock.setWidget(self.rules_panel)
+        self.addDockWidget(Qt.RightDockWidgetArea, rules_dock)
 
     # ---- capture control ----------------------------------------------------
     def start_live(self) -> None:
@@ -334,6 +341,42 @@ class MainWindow(QMainWindow):
             return
         n = export_pcap(path, [f for _ts, f in self.packets])
         self.statusBar().showMessage(f"Exported {n} packets -> {path}")
+
+    # ---- rules / dry-run ----------------------------------------------------
+    def _dry_run_over_capture(self) -> None:
+        if not self.packets:
+            self.statusBar().showMessage("No packets — capture or open a pcap first")
+            return
+        if not self.rules_panel.specs:
+            self.statusBar().showMessage("No rules defined — add a rule first")
+            return
+        engine = self.rules_panel.build_engine(dry_run=True)
+        matched: list[int] = []
+        for idx, (_ts, frame) in enumerate(self.packets):
+            try:
+                verdict = engine.evaluate(Packet.from_bytes(frame.data, link="ether"))
+            except Exception:
+                continue
+            if verdict.matched_rule:
+                matched.append(idx)
+        hits = {r.name: r.hits for r in engine.rules}
+        self.rules_panel.refresh(hits)
+        self._mark_rows(set(matched))
+        active = sum(1 for v in hits.values() if v)
+        self.statusBar().showMessage(
+            f"Dry-run (shadow): {len(matched)} of {len(self.packets)} packets matched "
+            f"by {active} rule(s) — no traffic altered"
+        )
+
+    def _mark_rows(self, matched: set[int]) -> None:
+        matched_brush = QBrush(QColor(theme.ACCENT_DIM))
+        clear = QBrush()
+        for r in range(self.table.rowCount()):
+            bg = matched_brush if r in matched else clear
+            for c in range(self.table.columnCount()):
+                item = self.table.item(r, c)
+                if item is not None:
+                    item.setBackground(bg)
 
     def show_doctor(self) -> None:
         from reforge.diagnostics.doctor import run_checks
