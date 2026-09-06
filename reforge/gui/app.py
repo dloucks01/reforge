@@ -19,9 +19,11 @@ def run_gui() -> int:
     from reforge.gui.main_window import MainWindow
     from reforge.gui.theme import apply_theme
 
+    from reforge.gui.theme import load_mode
+
     app = QApplication(sys.argv)
     app.setApplicationName("Reforge")
-    apply_theme(app)
+    apply_theme(app, load_mode())
     window = MainWindow()
     window.show()
     return app.exec()

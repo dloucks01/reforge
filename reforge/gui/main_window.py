@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QComboBox,
     QDockWidget,
     QFileDialog,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QSizePolicy,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -77,15 +79,11 @@ class MainWindow(QMainWindow):
         tb.setMovable(False)
         self.addToolBar(tb)
 
-        brand = QLabel(f"  {APP_NAME}  ")
-        brand.setStyleSheet(
-            f"color: {theme.ACCENT}; font-size: 16px; font-weight: 800;"
-            " letter-spacing: 0.5px;"
-        )
-        tb.addWidget(brand)
-        sep = QLabel("│")
-        sep.setStyleSheet(f"color: {theme.BORDER_LIGHT}; padding: 0 6px;")
-        tb.addWidget(sep)
+        self.brand = QLabel(f"  {APP_NAME}  ")
+        tb.addWidget(self.brand)
+        self.sep = QLabel("│")
+        tb.addWidget(self.sep)
+        self._restyle_brand()
 
         tb.addWidget(QLabel(" Interface: "))
         self.iface_combo = QComboBox()
@@ -124,6 +122,15 @@ class MainWindow(QMainWindow):
         act_doctor = QAction("Doctor", self)
         act_doctor.triggered.connect(self.show_doctor)
         tb.addAction(act_doctor)
+
+        # push the theme toggle to the far right
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        tb.addWidget(spacer)
+        self.act_theme = QAction("", self)
+        self.act_theme.triggered.connect(self.toggle_theme)
+        tb.addAction(self.act_theme)
+        self._update_theme_action()
 
     def _build_center(self) -> None:
         self.table = QTableWidget(0, len(COLUMNS))
@@ -335,6 +342,45 @@ class MainWindow(QMainWindow):
                  + (f"\n    fix: {c.fix}" if (not c.ok and c.fix) else "")
                  for c in run_checks()]
         QMessageBox.information(self, "Doctor", "\n".join(lines))
+
+    # ---- theme --------------------------------------------------------------
+    def _restyle_brand(self) -> None:
+        self.brand.setStyleSheet(
+            f"color: {theme.ACCENT}; font-size: 16px; font-weight: 800;"
+            " letter-spacing: 0.5px;"
+        )
+        self.sep.setStyleSheet(f"color: {theme.BORDER_LIGHT}; padding: 0 6px;")
+
+    def _update_theme_action(self) -> None:
+        # Show what a click will switch TO.
+        if theme.current_mode() == "dark":
+            self.act_theme.setText("☀  Light")
+        else:
+            self.act_theme.setText("☾  Dark")
+
+    def toggle_theme(self) -> None:
+        mode = theme.toggle_mode()
+        theme.apply_theme(QApplication.instance(), mode)
+        theme.save_mode(mode)
+        self._restyle_brand()
+        self._update_theme_action()
+        self._recolor_rows()
+        self._on_select()  # refresh tree colors for the selected packet
+
+    def _recolor_rows(self) -> None:
+        """Re-apply per-protocol foreground colors after a theme change."""
+        for r in range(self.table.rowCount()):
+            proto_item = self.table.item(r, 4)
+            if proto_item is None:
+                continue
+            proto = proto_item.text()
+            color = QColor(theme.PROTO_MALFORMED if proto == "malformed"
+                           else theme.proto_color(proto))
+            brush = QBrush(color)
+            for c in range(self.table.columnCount()):
+                item = self.table.item(r, c)
+                if item is not None:
+                    item.setForeground(brush)
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt signature)
         self.stop_capture()
