@@ -12,15 +12,13 @@ See [`PLAN.md`](PLAN.md) for the full design and roadmap, and
 
 ## Status
 
-**Phase 4 — interactive intercept & edit.** On top of Phases 0-3 (foundations, live/
-offline capture with a stylized dark/light GUI, the match→action rule engine with NFQUEUE,
-and the userspace transparent bridge), the tool now has an interactive interception queue:
-a rule can HOLD a matched packet, which parks in the queue (non-blocking, so the wire never
-stalls) for the operator to inspect, edit field-by-field or as raw hex, then Forward /
-Forward-modified / Drop. An Arm/pass-through state machine gates manipulation, and a
-kill-switch instantly reverts to pass-through and releases all held packets. Verified
-end-to-end in the netns lab: held ICMP forwarded (ping passes) vs dropped (ping fails).
-Next: packet crafting & transmission (Phase 5).
+**Phase 5 — packet crafting & transmission.** On top of Phases 0-4 (capture, stylized
+GUI, rule engine + NFQUEUE, userspace bridge, interactive intercept), the tool now has a
+visual packet builder: stack layers from a palette (Ether/VLAN/ARP/IP/IPv6/ICMP/TCP/UDP/
+DNS/Raw), edit every header and data field, preview the built bytes live, and send one-shot,
+looped, or send-and-receive. Load a captured packet straight into the builder to edit and
+resend, and save/load templates. Checksums/lengths auto-compute unless overridden. Verified
+live: a crafted packet sent on one veth arrives intact on its peer.
 
 Run the bridge headless:
 

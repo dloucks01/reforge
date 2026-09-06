@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QToolBar,
     QTreeWidget,
     QTreeWidgetItem,
@@ -38,6 +39,7 @@ from PySide6.QtWidgets import (
 from reforge.core.intercept import InterceptQueue
 from reforge.core.packet import Packet
 from reforge.gui import theme
+from reforge.gui.builder_panel import BuilderPanel
 from reforge.gui.intercept_panel import InterceptPanel
 from reforge.gui.rules_panel import RulesPanel
 
@@ -201,7 +203,19 @@ class MainWindow(QMainWindow):
         center.addWidget(self.table)
         center.addWidget(detail)
         center.setSizes([500, 350])
-        self.setCentralWidget(center)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(center, "Capture")
+        self.builder_panel = BuilderPanel(get_selected_packet=self._selected_packet_bytes)
+        self.tabs.addTab(self.builder_panel, "Builder")
+        self.setCentralWidget(self.tabs)
+
+    def _selected_packet_bytes(self) -> bytes | None:
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        i = rows[0].row()
+        return self.packets[i][1].data if i < len(self.packets) else None
 
     def _build_docks(self) -> None:
         left = QDockWidget("Session", self)
