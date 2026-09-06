@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reforge"
+version = "0.0.1"
+description = "Inline packet interception & manipulation suite (authorized security testing)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary — authorized use only" }
+authors = [{ name = "Reforge project" }]
+dependencies = [
+    "scapy>=2.7",
+    "PySide6>=6.6",
+    # netfilterqueue is installed via the distro package (python3-netfilterqueue)
+    # because it needs libnetfilter-queue headers to build.
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+reforge = "reforge.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["reforge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

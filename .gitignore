@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.pcap
+*.pcapng
+!lab/samples/*.pcap
+.reforge.json
+*.AppImage
+AppDir/
