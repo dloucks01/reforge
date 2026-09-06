@@ -53,6 +53,12 @@ def build_action(spec: dict):
         return A.Delay(spec.get("seconds", 0.0))
     if t == "duplicate":
         return A.Duplicate(spec.get("times", 1))
+    if t == "fuzz":
+        from reforge.craft.fuzz import Fuzz
+
+        return Fuzz(spec.get("mutations", 1), spec.get("seed"))
+    if t == "plugin":
+        return A.Plugin(spec["name"])
     raise ValueError(f"unknown action type: {t}")
 
 
@@ -95,4 +101,8 @@ def action_summary(spec: dict) -> str:
         return f"delay {spec.get('seconds')}s"
     if t == "duplicate":
         return f"duplicate x{spec.get('times', 1)}"
+    if t == "fuzz":
+        return f"fuzz x{spec.get('mutations', 1)}"
+    if t == "plugin":
+        return f"plugin {spec.get('name')}"
     return t

@@ -12,13 +12,13 @@ See [`PLAN.md`](PLAN.md) for the full design and roadmap, and
 
 ## Status
 
-**Phase 6 — diagnostics & troubleshooting.** On top of Phases 0-5 (capture, stylized GUI,
-rule engine + NFQUEUE, userspace bridge, interactive intercept, packet crafting), the tool
-now has a Diagnostics tab so the operator can find and fix problems without leaving the app:
-a Doctor self-check panel, a live Health dashboard (counters + rates), a packet-path Tracer
-that explains why each rule did/didn't fire on a selected packet, an end-to-end pipeline
-Self-test, a Logs viewer with one-click diagnostic-bundle export, and a searchable offline
-Knowledge base of common inline-tool pitfalls. Next: advanced protocols & fuzzing (Phase 7).
+**Phase 7 — advanced protocols & logic.** On top of Phases 0-6, the tool now handles
+proprietary and advanced traffic: define a custom protocol from a declarative field spec
+and it becomes a first-class layer (auto-dissected, matchable, editable, buildable) — ideal
+for ICS/OT and proprietary formats; fuzz matched packets inline or fuzz-send mutated variants
+from the builder; extend the engine with Python plugins (operator-authored transforms usable
+as rule actions, plus protocol registration); and keep TCP flows in sync after length-changing
+edits with a sequence/ack fixer. Next: performance backends & airgap packaging (Phase 8).
 
 Run the bridge headless:
 

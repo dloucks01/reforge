@@ -155,6 +155,10 @@ class MainWindow(QMainWindow):
         act_doctor.triggered.connect(self.show_doctor)
         tb.addAction(act_doctor)
 
+        act_plugins = QAction("Plugins", self)
+        act_plugins.triggered.connect(self.load_plugins)
+        tb.addAction(act_plugins)
+
         # push the theme toggle to the far right
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -495,6 +499,21 @@ class MainWindow(QMainWindow):
                 item = self.table.item(r, c)
                 if item is not None:
                     item.setBackground(bg)
+
+    def load_plugins(self) -> None:
+        directory = QFileDialog.getExistingDirectory(self, "Select plugins directory")
+        if not directory:
+            return
+        from reforge.plugins import PluginManager
+
+        if not hasattr(self, "plugin_mgr"):
+            self.plugin_mgr = PluginManager()
+        n = self.plugin_mgr.load_dir(directory)
+        # custom protocols registered by plugins appear in the builder palette
+        self.builder_panel.layer_combo.clear()
+        from reforge.craft import builder as _b
+        self.builder_panel.layer_combo.addItems(_b.available_layers())
+        self.statusBar().showMessage(f"Loaded {n} plugin(s) from {directory}")
 
     def show_doctor(self) -> None:
         from reforge.diagnostics.doctor import run_checks

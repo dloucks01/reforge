@@ -35,12 +35,21 @@ _LAYER_PATHS = {
 # Fields Scapy should recompute rather than take from a captured packet.
 _AUTO = {"len", "chksum", "plen", "ulen"}
 
+# Runtime-registered custom/proprietary protocol classes (name -> scapy class).
+CUSTOM: dict = {}
+
+
+def register_custom(name: str, cls) -> None:
+    CUSTOM[name] = cls
+
 
 def available_layers() -> list[str]:
-    return list(_LAYER_PATHS)
+    return list(_LAYER_PATHS) + list(CUSTOM)
 
 
 def _layer_class(name: str):
+    if name in CUSTOM:
+        return CUSTOM[name]
     mod, cls = _LAYER_PATHS[name]
     return getattr(__import__(mod, fromlist=[cls]), cls)
 

@@ -88,13 +88,15 @@ class BuilderPanel(QWidget):
         self.l2 = QCheckBox("L2"); self.l2.setChecked(True)
         btn_send = QPushButton("Send"); btn_send.clicked.connect(self._send)
         btn_sr = QPushButton("Send && Receive"); btn_sr.clicked.connect(self._send_receive)
+        btn_fuzz = QPushButton("Fuzz send"); btn_fuzz.clicked.connect(self._fuzz_send)
+        proto = QPushButton("Load protocol"); proto.clicked.connect(self._load_protocol)
         save = QPushButton("Save template"); save.clicked.connect(self._save)
         load = QPushButton("Load template"); load.clicked.connect(self._load)
         for w in (QLabel("Iface:"), self.iface, QLabel("Count:"), self.count,
-                  QLabel("Interval:"), self.interval, self.l2, btn_send, btn_sr):
+                  QLabel("Interval:"), self.interval, self.l2, btn_send, btn_sr, btn_fuzz):
             send.addWidget(w)
         send.addStretch(1)
-        send.addWidget(save); send.addWidget(load)
+        send.addWidget(proto); send.addWidget(save); send.addWidget(load)
         root.addLayout(send)
 
         self.status = QLabel("Add a layer to begin.")
@@ -222,6 +224,36 @@ class BuilderPanel(QWidget):
         self.preview.setPlainText("REPLY: " + Ether(reply).summary() + "\n\n"
                                   + "\n".join(scapy_tree.hexdump_lines(reply)))
         self.status.setText(f"Reply: {len(reply)} bytes.")
+
+    def _fuzz_send(self) -> None:
+        data = self._current_bytes()
+        if data is None:
+            return
+        from reforge.craft.fuzz import mutate
+
+        iface = self.iface.currentText()
+        try:
+            for _ in range(self.count.value()):
+                sender.inject(iface, mutate(data, mutations=3), 1, 0.0, self.l2.isChecked())
+            self.status.setText(f"Fuzz-sent {self.count.value()} mutated variant(s) on {iface}.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Send error", str(exc))
+
+    def _load_protocol(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Load protocol (JSON)", "", "JSON (*.json)")
+        if not path:
+            return
+        from reforge.craft.custom_proto import define_protocol
+
+        try:
+            spec = json.loads(open(path).read())
+            define_protocol(spec)
+        except Exception as exc:
+            QMessageBox.critical(self, "Protocol error", str(exc))
+            return
+        self.layer_combo.clear()
+        self.layer_combo.addItems(builder.available_layers())
+        self.status.setText(f"Loaded protocol '{spec.get('name')}' — now in the layer palette.")
 
     # ---- templates / capture ------------------------------------------------
     def load_spec(self, spec: dict) -> None:

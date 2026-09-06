@@ -102,3 +102,21 @@ class Duplicate(Action):
         for _ in range(max(1, self.times)):
             verdict.extra_sends.append(Packet.from_bytes(raw, link=pkt.link))
         verdict.notes.append(f"duplicate x{self.times}")
+
+
+@dataclass
+class Plugin(Action):
+    """Run an operator-registered plugin transform on the packet."""
+
+    name: str
+
+    def apply(self, pkt: Packet, verdict: Verdict) -> None:
+        from reforge.plugins import transform
+
+        fn = transform(self.name)
+        if fn is None:
+            verdict.notes.append(f"plugin '{self.name}' not loaded")
+            return
+        fn(pkt.scapy())
+        pkt.modified = True
+        verdict.notes.append(f"plugin {self.name}")
