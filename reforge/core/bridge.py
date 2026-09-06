@@ -83,13 +83,16 @@ class UserspaceBridge:
 
     def __init__(self, if_a: str, if_b: str, engine: RuleEngine | None = None, *,
                  port_factory=ScapyPort, fail_open: bool = True,
-                 tap: bool = True, max_queue: int = 100_000):
+                 tap: bool = True, max_queue: int = 100_000,
+                 intercept=None, armed: bool = True):
         self.if_a = if_a
         self.if_b = if_b
         self.engine = engine or RuleEngine([])
         self.port_factory = port_factory
         self.fail_open = fail_open
         self.tap = tap
+        self.intercept = intercept       # optional InterceptQueue
+        self.armed = armed               # False = pure pass-through (safe)
         self.counters = BridgeCounters()
 
         self._queue: "Queue[tuple[float, Frame]]" = Queue(maxsize=max_queue)
@@ -104,41 +107,96 @@ class UserspaceBridge:
         self._sent: dict[bytes, float] = {}
         self._suppress_ttl = 0.5
 
-    # ---- per-frame logic (pure + testable) ---------------------------------
-    def process_frame(self, ingress: str, data: bytes) -> list[bytes]:
-        """Return the bytes to transmit on the peer port for one input frame."""
+    # ---- per-frame logic ----------------------------------------------------
+    def _bump_dir(self, ingress: str, n: int) -> None:
+        if ingress == self.if_a:
+            self.counters.a_to_b += n
+        else:
+            self.counters.b_to_a += n
+
+    def _forward(self, ingress: str, data: bytes, send_peer) -> None:
+        """Core per-frame handling: engine → forward/drop/hold via send_peer."""
         self.counters.captured += 1
         self._observe(ingress, data)
+
+        if not self.armed:                      # pass-through (safe mode)
+            send_peer(data)
+            self._remember_sent(data)
+            self.counters.forwarded += 1
+            self._bump_dir(ingress, 1)
+            return
+
         try:
             res = apply_engine(self.engine, data, ingress=ingress, link="ether")
         except Exception:
             self.counters.errors += 1
             log.exception("engine error; forwarding original frame")
-            return [data]
+            send_peer(data)
+            self._remember_sent(data)
+            self.counters.forwarded += 1
+            return
 
         if res.disposition is Disposition.DROP:
             self.counters.dropped += 1
-            return []
+            return
+
         if res.disposition is Disposition.HOLD:
-            # Interactive intercept queue is Phase 4; pass through for now.
             self.counters.held += 1
+            if self.intercept is not None:
+                self._park(ingress, data, send_peer)
+                return
+            # no interception queue attached: pass through
+            send_peer(data)
+            self._remember_sent(data)
+            self.counters.forwarded += 1
+            self._bump_dir(ingress, 1)
+            return
 
         if res.delay_s:
             time.sleep(res.delay_s)
 
         out = res.out if res.out is not None else data
-        sends = [out]
+        send_peer(out)
+        self._remember_sent(out)
+        self.counters.forwarded += 1
+        self._bump_dir(ingress, 1)
         if res.modified:
             self.counters.modified += 1
         for extra in res.extra:
-            sends.append(extra)
+            send_peer(extra)
+            self._remember_sent(extra)
             self.counters.injected += 1
+            self.counters.forwarded += 1
+            self._bump_dir(ingress, 1)
 
-        self.counters.forwarded += len(sends)
-        if ingress == self.if_a:
-            self.counters.a_to_b += len(sends)
-        else:
-            self.counters.b_to_a += len(sends)
+    def _park(self, ingress: str, data: bytes, send_peer) -> None:
+        """Divert a held packet to the interception queue (non-blocking)."""
+        def release(out_bytes, *, _ingress=ingress, _send=send_peer, _orig=data):
+            if out_bytes is None:
+                self.counters.dropped += 1
+                return
+            _send(out_bytes)
+            self._remember_sent(out_bytes)
+            self.counters.forwarded += 1
+            self._bump_dir(_ingress, 1)
+            if out_bytes != _orig:
+                self.counters.modified += 1
+
+        self.intercept.hold(ingress, data, release)
+
+    def process_frame(self, ingress: str, data: bytes) -> list[bytes]:
+        """Pure form for tests/headless: returns bytes to send on the peer port.
+
+        Uses the same core logic with a collector as the transmit function and
+        no interception queue (HOLD falls through to pass-through).
+        """
+        sends: list[bytes] = []
+        saved = self.intercept
+        self.intercept = None
+        try:
+            self._forward(ingress, data, sends.append)
+        finally:
+            self.intercept = saved
         return sends
 
     def _remember_sent(self, data: bytes) -> None:
@@ -201,9 +259,7 @@ class UserspaceBridge:
                         continue
                     if self._is_own_echo(data):
                         continue  # a frame we just transmitted; don't loop it
-                    for out in self.process_frame(iface, data):
-                        dst.send(out)
-                        self._remember_sent(out)
+                    self._forward(iface, data, dst.send)
         except Exception:
             log.exception("bridge loop error")
         finally:

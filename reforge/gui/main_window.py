@@ -35,8 +35,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from reforge.core.intercept import InterceptQueue
 from reforge.core.packet import Packet
 from reforge.gui import theme
+from reforge.gui.intercept_panel import InterceptPanel
 from reforge.gui.rules_panel import RulesPanel
 
 from reforge.capture.afpacket import AfPacketBackend
@@ -59,6 +61,7 @@ class MainWindow(QMainWindow):
         self.resize(1300, 850)
 
         self.service: CaptureService | None = None
+        self.intercept: InterceptQueue | None = None
         self.packets: list[tuple[float, Frame]] = []  # captured (ts, frame)
         self._t0: float | None = None
 
@@ -120,6 +123,16 @@ class MainWindow(QMainWindow):
         self.act_stop.triggered.connect(self.stop_capture)
         self.act_stop.setEnabled(False)
         tb.addAction(self.act_stop)
+
+        tb.addSeparator()
+        self.act_arm = QAction("Arm", self)
+        self.act_arm.setCheckable(True)
+        self.act_arm.toggled.connect(self._on_arm_toggled)
+        tb.addAction(self.act_arm)
+
+        self.act_kill = QAction("Kill-switch", self)
+        self.act_kill.triggered.connect(self.kill_switch)
+        tb.addAction(self.act_kill)
 
         tb.addSeparator()
         act_open = QAction("Open pcap", self)
@@ -202,6 +215,13 @@ class MainWindow(QMainWindow):
         rules_dock.setWidget(self.rules_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, rules_dock)
 
+        intercept_dock = QDockWidget("Intercept", self)
+        self.intercept_panel = InterceptPanel()
+        intercept_dock.setWidget(self.intercept_panel)
+        self.addDockWidget(Qt.RightDockWidgetArea, intercept_dock)
+        self.tabifyDockWidget(rules_dock, intercept_dock)
+        rules_dock.raise_()
+
     # ---- capture control ----------------------------------------------------
     def _on_mode_changed(self, mode: str) -> None:
         bridge = mode == "Bridge"
@@ -235,10 +255,12 @@ class MainWindow(QMainWindow):
         from reforge.core.bridge import UserspaceBridge
 
         engine = self.rules_panel.build_engine(dry_run=False)
-        armed = len([r for r in engine.rules if r.enabled]) > 0
-        bridge = UserspaceBridge(a, b, engine)
-        label = f"bridge {a} <-> {b}" + ("  [ARMED]" if armed else "  [pass-through]")
-        self._start_service(bridge, label)
+        self.intercept = InterceptQueue()
+        self.intercept_panel.set_queue(self.intercept)
+        armed = self.act_arm.isChecked()
+        bridge = UserspaceBridge(a, b, engine, intercept=self.intercept, armed=armed)
+        state = "ARMED" if armed else "pass-through (safe)"
+        self._start_service(bridge, f"bridge {a} <-> {b}  [{state}]")
 
     def open_pcap(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -266,6 +288,10 @@ class MainWindow(QMainWindow):
 
     def stop_capture(self) -> None:
         self.timer.stop()
+        if self.intercept is not None:
+            self.intercept.release_all("forward")  # never strand held packets
+            self.intercept_panel.set_queue(None)
+            self.intercept = None
         if self.service:
             self._flush_rows()  # flush remaining (no auto-stop re-entry)
             self.service.stop()
@@ -296,14 +322,37 @@ class MainWindow(QMainWindow):
         return len(batch)
 
     def _drain(self) -> None:
-        """Timer handler: flush rows and auto-stop when the source is done."""
+        """Timer handler: flush rows, refresh held packets, auto-stop when done."""
         if not self.service:
             return
+        if self.intercept is not None:
+            self.intercept_panel.refresh_pending()
         n = self._flush_rows()
         if n == 0 and not self.service.running:
             self.stop_capture()
         elif n:
             self.statusBar().showMessage(f"Capturing — {len(self.packets)} packets")
+
+    # ---- arm / kill-switch --------------------------------------------------
+    def _on_arm_toggled(self, armed: bool) -> None:
+        self.act_arm.setText("ARMED" if armed else "Arm")
+        if self.service is not None and hasattr(self.service, "armed"):
+            self.service.armed = armed
+            self.statusBar().showMessage("ARMED — rules active" if armed
+                                         else "Safe — pass-through")
+
+    def kill_switch(self) -> None:
+        """Instantly revert to pass-through and release all held packets."""
+        if self.service is not None and hasattr(self.service, "armed"):
+            self.service.armed = False
+        if self.act_arm.isChecked():
+            self.act_arm.setChecked(False)  # triggers _on_arm_toggled
+        released = 0
+        if self.intercept is not None:
+            released = self.intercept.release_all("forward")
+            self.intercept_panel.refresh_pending()
+        self.statusBar().showMessage(
+            f"KILL-SWITCH — pass-through; released {released} held packet(s)")
 
     def _append_row(self, ts: float, frame: Frame) -> None:
         from scapy.layers.l2 import Ether

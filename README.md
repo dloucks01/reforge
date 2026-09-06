@@ -12,15 +12,15 @@ See [`PLAN.md`](PLAN.md) for the full design and roadmap, and
 
 ## Status
 
-**Phase 3 — userspace transparent bridge.** On top of Phases 0-2 (foundations, live/
-offline capture with a stylized dark/light GUI, and the match→action rule engine with
-NFQUEUE), the tool now has a real dual-NIC userspace bridge: it forwards traffic inline
-between two interfaces, manipulates it at L2-L7 through the rule engine, and is protected
-by a watchdog with a fail-open (kernel-bridge fallback) or fail-closed policy. Interface
-prep (offload disable, promiscuous/allmulti, host-stack suppression) and teardown are
-idempotent and self-reverting. Verified end-to-end in the netns lab: pass-through
-forwarding (including ARP/broadcast) and an inline ICMP-drop rule. Next: the interactive
-intercept & edit queue (Phase 4).
+**Phase 4 — interactive intercept & edit.** On top of Phases 0-3 (foundations, live/
+offline capture with a stylized dark/light GUI, the match→action rule engine with NFQUEUE,
+and the userspace transparent bridge), the tool now has an interactive interception queue:
+a rule can HOLD a matched packet, which parks in the queue (non-blocking, so the wire never
+stalls) for the operator to inspect, edit field-by-field or as raw hex, then Forward /
+Forward-modified / Drop. An Arm/pass-through state machine gates manipulation, and a
+kill-switch instantly reverts to pass-through and releases all held packets. Verified
+end-to-end in the netns lab: held ICMP forwarded (ping passes) vs dropped (ping fails).
+Next: packet crafting & transmission (Phase 5).
 
 Run the bridge headless:
 
