@@ -43,9 +43,14 @@ def _check_scapy() -> Check:
 def _check_pyside() -> Check:
     try:
         import PySide6
-        return Check("pyside6", True, f"PySide6 {PySide6.__version__}")
+        # The base package can be present without the compiled Qt modules;
+        # the GUI needs QtWidgets/QtCore/QtGui specifically.
+        from PySide6 import QtCore, QtGui, QtWidgets  # noqa: F401
+        return Check("pyside6", True, f"PySide6 {PySide6.__version__} (Qt {QtCore.qVersion()})")
     except Exception as exc:
-        return Check("pyside6", False, str(exc), "apt install python3-pyside6")
+        return Check("pyside6", False, str(exc),
+                     "apt install python3-pyside6.qtwidgets python3-pyside6.qtcore "
+                     "python3-pyside6.qtgui")
 
 
 def _check_netfilterqueue() -> Check:

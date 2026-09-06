@@ -1,78 +1,299 @@
-"""Main window skeleton (PySide6).
+"""Main window (Phase 1): live capture list + protocol tree + hex view.
 
-Phase 0 stands up the shell and docks named in PLAN.md section 5 so the layout
-is real and navigable. Widgets are placeholders wired to live data in later
-phases.
+Capture runs on a background thread (CaptureService); the UI drains its queue on
+a timer, so the packet list stays responsive and Qt is only touched on the UI
+thread. Live capture (AF_PACKET) needs root/CAP_NET_RAW; opening a pcap works
+unprivileged.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+import datetime as _dt
+import logging
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QAction, QFont
 from PySide6.QtWidgets import (
+    QComboBox,
     QDockWidget,
+    QFileDialog,
     QLabel,
+    QLineEdit,
     QMainWindow,
+    QMessageBox,
     QPlainTextEdit,
+    QSplitter,
     QTableWidget,
-    QTabWidget,
+    QTableWidgetItem,
     QToolBar,
     QTreeWidget,
+    QTreeWidgetItem,
     QWidget,
 )
 
+from reforge.capture.afpacket import AfPacketBackend
+from reforge.capture.base import Frame
+from reforge.capture.pcap import PcapFileBackend, export_pcap
+from reforge.capture.registry import list_interfaces
 from reforge.constants import APP_NAME, TAGLINE, VERSION
-from reforge.diagnostics.doctor import run_checks
+from reforge.core.capture_service import CaptureService
+from reforge.dissect import scapy_tree
+
+log = logging.getLogger("reforge.gui")
+
+COLUMNS = ["No.", "Time", "Source", "Destination", "Proto", "Length", "Info"]
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {VERSION} — {TAGLINE}")
-        self.resize(1280, 800)
+        self.resize(1300, 850)
+
+        self.service: CaptureService | None = None
+        self.packets: list[tuple[float, Frame]] = []  # captured (ts, frame)
+        self._t0: float | None = None
 
         self._build_toolbar()
         self._build_center()
         self._build_docks()
-        self.statusBar().showMessage("Pass-through (not armed)")
 
+        self.timer = QTimer(self)
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self._drain)
+
+        self.statusBar().showMessage("Idle — open a pcap or start a live capture")
+
+    # ---- layout -------------------------------------------------------------
     def _build_toolbar(self) -> None:
         tb = QToolBar("main")
-        tb.addWidget(QLabel("  Interface: [ none ]   Mode: userspace-bridge   Backend: af_packet   "))
-        tb.addAction("Start")
-        tb.addAction("Stop")
-        tb.addAction("Kill-switch")
+        tb.setMovable(False)
         self.addToolBar(tb)
 
+        tb.addWidget(QLabel(" Interface: "))
+        self.iface_combo = QComboBox()
+        self.iface_combo.addItems(list_interfaces() or ["<none>"])
+        tb.addWidget(self.iface_combo)
+
+        tb.addWidget(QLabel("  BPF: "))
+        self.bpf_edit = QLineEdit()
+        self.bpf_edit.setPlaceholderText("e.g. tcp port 80 (optional)")
+        self.bpf_edit.setMaximumWidth(240)
+        tb.addWidget(self.bpf_edit)
+
+        self.act_start = QAction("Start", self)
+        self.act_start.triggered.connect(self.start_live)
+        tb.addAction(self.act_start)
+
+        self.act_stop = QAction("Stop", self)
+        self.act_stop.triggered.connect(self.stop_capture)
+        self.act_stop.setEnabled(False)
+        tb.addAction(self.act_stop)
+
+        tb.addSeparator()
+        act_open = QAction("Open pcap", self)
+        act_open.triggered.connect(self.open_pcap)
+        tb.addAction(act_open)
+
+        act_export = QAction("Export pcap", self)
+        act_export.triggered.connect(self.export_pcap)
+        tb.addAction(act_export)
+
+        act_clear = QAction("Clear", self)
+        act_clear.triggered.connect(self.clear)
+        tb.addAction(act_clear)
+
+        tb.addSeparator()
+        act_doctor = QAction("Doctor", self)
+        act_doctor.triggered.connect(self.show_doctor)
+        tb.addAction(act_doctor)
+
     def _build_center(self) -> None:
-        tabs = QTabWidget()
+        self.table = QTableWidget(0, len(COLUMNS))
+        self.table.setHorizontalHeaderLabels(COLUMNS)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.itemSelectionChanged.connect(self._on_select)
 
-        live = QTableWidget(0, 5)
-        live.setHorizontalHeaderLabels(["Time", "Source", "Dest", "Proto", "Info"])
-        tabs.addTab(live, "Live capture")
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Field", "Value"])
 
-        intercept = QTableWidget(0, 4)
-        intercept.setHorizontalHeaderLabels(["Held", "Source", "Dest", "Proto"])
-        tabs.addTab(intercept, "Intercept queue")
+        mono = QFont("monospace")
+        mono.setStyleHint(QFont.Monospace)
+        self.hex = QPlainTextEdit()
+        self.hex.setReadOnly(True)
+        self.hex.setFont(mono)
 
-        tabs.addTab(QWidget(), "Packet builder")
-        self.setCentralWidget(tabs)
+        detail = QSplitter(Qt.Horizontal)
+        detail.addWidget(self.tree)
+        detail.addWidget(self.hex)
+        detail.setSizes([650, 650])
+
+        center = QSplitter(Qt.Vertical)
+        center.addWidget(self.table)
+        center.addWidget(detail)
+        center.setSizes([500, 350])
+        self.setCentralWidget(center)
 
     def _build_docks(self) -> None:
-        # Detail: protocol tree + hex (right)
-        detail = QDockWidget("Packet detail", self)
-        detail.setWidget(QTreeWidget())
-        self.addDockWidget(Qt.RightDockWidgetArea, detail)
-
-        # Session/rules/library (left)
         left = QDockWidget("Session", self)
-        left.setWidget(QTreeWidget())
+        session_tree = QTreeWidget()
+        session_tree.setHeaderLabels(["Session"])
+        left.setWidget(session_tree)
         self.addDockWidget(Qt.LeftDockWidgetArea, left)
 
-        # Diagnostics (bottom) — populated from the Doctor at startup
-        diag = QDockWidget("Diagnostics", self)
-        log_view = QPlainTextEdit()
-        log_view.setReadOnly(True)
-        for c in run_checks():
-            log_view.appendPlainText(f"[{'PASS' if c.ok else 'FAIL'}] {c.name}: {c.detail}")
-        diag.setWidget(log_view)
-        self.addDockWidget(Qt.BottomDockWidgetArea, diag)
+    # ---- capture control ----------------------------------------------------
+    def start_live(self) -> None:
+        iface = self.iface_combo.currentText()
+        if iface in ("", "<none>"):
+            self.statusBar().showMessage("No interface selected")
+            return
+        bpf = self.bpf_edit.text().strip() or None
+        try:
+            backend = AfPacketBackend([iface], bpf=bpf)
+        except Exception as exc:
+            QMessageBox.critical(self, "Capture error", str(exc))
+            return
+        self._start(backend, f"live on {iface}")
+
+    def open_pcap(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open pcap", "", "Capture files (*.pcap *.pcapng *.cap);;All files (*)"
+        )
+        if not path:
+            return
+        self._start(PcapFileBackend(path), f"pcap {path}")
+
+    def _start(self, backend, label: str) -> None:
+        self.stop_capture()
+        self.clear()
+        self.service = CaptureService(backend)
+        try:
+            self.service.start()
+        except Exception as exc:
+            QMessageBox.critical(self, "Capture error", str(exc))
+            self.service = None
+            return
+        self.timer.start()
+        self.act_start.setEnabled(False)
+        self.act_stop.setEnabled(True)
+        self.statusBar().showMessage(f"Capturing — {label}")
+
+    def stop_capture(self) -> None:
+        self.timer.stop()
+        if self.service:
+            self._flush_rows()  # flush remaining (no auto-stop re-entry)
+            self.service.stop()
+            self.service = None
+        self.act_start.setEnabled(True)
+        self.act_stop.setEnabled(False)
+        self.statusBar().showMessage(f"Stopped — {len(self.packets)} packets")
+
+    def clear(self) -> None:
+        self.table.setRowCount(0)
+        self.tree.clear()
+        self.hex.clear()
+        self.packets.clear()
+        self._t0 = None
+
+    # ---- data flow ----------------------------------------------------------
+    def _flush_rows(self) -> int:
+        """Drain queued frames into the table. Returns how many were appended."""
+        if not self.service:
+            return 0
+        batch = self.service.drain()
+        if not batch:
+            return 0
+        self.table.setUpdatesEnabled(False)
+        for ts, frame in batch:
+            self._append_row(ts, frame)
+        self.table.setUpdatesEnabled(True)
+        return len(batch)
+
+    def _drain(self) -> None:
+        """Timer handler: flush rows and auto-stop when the source is done."""
+        if not self.service:
+            return
+        n = self._flush_rows()
+        if n == 0 and not self.service.running:
+            self.stop_capture()
+        elif n:
+            self.statusBar().showMessage(f"Capturing — {len(self.packets)} packets")
+
+    def _append_row(self, ts: float, frame: Frame) -> None:
+        from scapy.layers.l2 import Ether
+
+        idx = len(self.packets)
+        self.packets.append((ts, frame))
+        if self._t0 is None:
+            self._t0 = ts
+        try:
+            pkt = Ether(frame.data)
+            row = scapy_tree.summarize(pkt, index=idx, ts=ts)
+            rel = ts - self._t0
+            values = [str(idx), f"{rel:.6f}", row.src, row.dst, row.proto,
+                      str(row.length), row.info]
+        except Exception as exc:
+            values = [str(idx), f"{ts:.6f}", "", "", "malformed", str(len(frame.data)), str(exc)]
+
+        r = self.table.rowCount()
+        self.table.insertRow(r)
+        for c, v in enumerate(values):
+            self.table.setItem(r, c, QTableWidgetItem(v))
+
+    def _on_select(self) -> None:
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            return
+        idx = rows[0].row()
+        if idx >= len(self.packets):
+            return
+        _ts, frame = self.packets[idx]
+        self._show_detail(frame)
+
+    def _show_detail(self, frame: Frame) -> None:
+        from scapy.layers.l2 import Ether
+
+        self.tree.clear()
+        try:
+            pkt = Ether(frame.data)
+            for layer in scapy_tree.to_tree(pkt):
+                parent = QTreeWidgetItem([layer.name, ""])
+                for f in layer.fields:
+                    parent.addChild(QTreeWidgetItem([f.name, f.human]))
+                self.tree.addTopLevelItem(parent)
+                parent.setExpanded(True)
+        except Exception as exc:
+            self.tree.addTopLevelItem(QTreeWidgetItem(["error", str(exc)]))
+
+        self.hex.setPlainText("\n".join(scapy_tree.hexdump_lines(frame.data)))
+
+    # ---- misc ---------------------------------------------------------------
+    def export_pcap(self) -> None:
+        if not self.packets:
+            self.statusBar().showMessage("Nothing to export")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export pcap", "capture.pcap",
+                                              "pcap (*.pcap)")
+        if not path:
+            return
+        n = export_pcap(path, [f for _ts, f in self.packets])
+        self.statusBar().showMessage(f"Exported {n} packets -> {path}")
+
+    def show_doctor(self) -> None:
+        from reforge.diagnostics.doctor import run_checks
+
+        lines = [f"[{'PASS' if c.ok else 'FAIL'}] {c.name}: {c.detail}"
+                 + (f"\n    fix: {c.fix}" if (not c.ok and c.fix) else "")
+                 for c in run_checks()]
+        QMessageBox.information(self, "Doctor", "\n".join(lines))
+
+    def closeEvent(self, event) -> None:  # noqa: N802 (Qt signature)
+        self.stop_capture()
+        super().closeEvent(event)
+
+
+_ = _dt  # reserved for absolute-time column formatting
