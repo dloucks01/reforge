@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from reforge.capture.registry import list_interfaces
+from reforge.gui.errors import explain
 from reforge.scan import discovery, tcp
 from reforge.scan.engine import ScanEngine
 from reforge.scan.targets import expand_targets, parse_ports
@@ -118,7 +119,7 @@ class ScanPanel(QWidget):
                                 rows.append((host, str(port), st, svc))
                     self._rows = rows
             except Exception as exc:
-                self._rows = [("error", "", "", str(exc))]
+                self._rows = [("error", "", "", explain(exc))]
 
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()

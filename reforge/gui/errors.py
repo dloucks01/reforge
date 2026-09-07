@@ -10,7 +10,7 @@ from __future__ import annotations
 import errno
 
 
-def _hint(exc: BaseException, low: str) -> str:
+def _hint(exc, low: str) -> str:
     eno = getattr(exc, "errno", None)
     if (isinstance(exc, PermissionError) or eno == errno.EPERM
             or "operation not permitted" in low or "permission denied" in low):
@@ -30,8 +30,15 @@ def _hint(exc: BaseException, low: str) -> str:
     return ""
 
 
-def explain(exc: BaseException) -> str:
-    """A concise 'message — likely cause' string for a caught exception."""
-    msg = str(exc).strip() or exc.__class__.__name__
-    hint = _hint(exc, msg.lower())
+def explain(exc) -> str:
+    """A concise 'message — likely cause' string for an exception or message.
+
+    Accepts a caught exception or an already-formatted error string (e.g. a
+    stored stop reason), appending a likely-cause hint when one is recognized."""
+    if isinstance(exc, str):
+        msg = exc.strip()
+        hint = _hint(None, msg.lower())
+    else:
+        msg = str(exc).strip() or exc.__class__.__name__
+        hint = _hint(exc, msg.lower())
     return f"{msg} — {hint}" if hint else msg

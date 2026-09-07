@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import Qt
+
+from reforge.gui.errors import explain
 
 HOST_COLS = ["IP", "MAC", "OS", "Services"]
 CRED_COLS = ["Kind", "Proto", "From", "To", "User", "Secret"]
@@ -79,7 +80,7 @@ class ConsolePanel(QWidget):
                                            ssl_context=server_ctx)
             port = self._server.start()
         except Exception as exc:
-            self.summary.setText(f"error: {exc}"); return
+            self.summary.setText(f"error: {explain(exc)}"); return
         self._poll.start()
         mode = "mTLS" if server_ctx else "PLAINTEXT (bind loopback or tunnel!)"
         self.summary.setText(f"Collector on :{port} [{mode}] — waiting for sensors")
@@ -122,7 +123,6 @@ class ConsolePanel(QWidget):
             return
         from pathlib import Path
 
-        from reforge.attacks.tls_ca import DynamicCA
 
         if self._mtls is None:
             from reforge.distributed.tls import dev_mtls

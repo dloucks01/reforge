@@ -51,6 +51,7 @@ from reforge.gui.builder_panel import BuilderPanel
 from reforge.gui.console_panel import ConsolePanel
 from reforge.gui.creds_panel import CredsPanel
 from reforge.gui.diagnostics_panel import DiagnosticsPanel
+from reforge.gui.errors import explain
 from reforge.gui.fuzzing_panel import FuzzingPanel
 from reforge.gui.guidance import wrap_with_intro
 from reforge.gui.guide_panel import GuidePanel
@@ -397,7 +398,7 @@ class MainWindow(QMainWindow):
         try:
             backend = AfPacketBackend([iface], bpf=bpf)
         except Exception as exc:
-            QMessageBox.critical(self, "Capture error", str(exc))
+            QMessageBox.critical(self, "Capture error", explain(exc))
             return
         self._start_service(CaptureService(backend), f"live on {iface}")
 
@@ -447,7 +448,7 @@ class MainWindow(QMainWindow):
         try:
             self.service.start()
         except Exception as exc:
-            QMessageBox.critical(self, "Start error", str(exc))
+            QMessageBox.critical(self, "Start error", explain(exc))
             self.service = None
             return
         self.timer.start()
@@ -588,6 +589,7 @@ class MainWindow(QMainWindow):
         n = self._flush_rows()
         if n == 0 and not self.service.running:
             err = getattr(self.service, "error", None)
+            err = explain(err) if err else err
             self.stop_capture()
             if err:                             # stopped on an error (e.g. iface lost)
                 self.statusBar().showMessage(f"Capture stopped: {err}")
@@ -765,7 +767,7 @@ class MainWindow(QMainWindow):
             fn(src, dst, pw)
             self.statusBar().showMessage(f"{mode}ed {src} -> {dst}")
         except Exception as exc:
-            QMessageBox.critical(self, "Vault error", str(exc))
+            QMessageBox.critical(self, "Vault error", explain(exc))
 
     def load_plugins(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "Select plugins directory")

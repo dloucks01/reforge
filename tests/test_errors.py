@@ -26,3 +26,9 @@ def test_routing_and_resolution_hints():
 def test_unknown_error_has_no_hint():
     out = explain(ValueError("some other thing"))
     assert out == "some other thing" and " — " not in out
+
+
+def test_explain_accepts_string():
+    assert "interface" in explain("OSError: No such device")
+    assert "root" in explain("Operation not permitted")
+    assert explain("some plain message") == "some plain message"

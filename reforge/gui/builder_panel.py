@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 from reforge.capture.registry import list_interfaces
 from reforge.craft import builder, sender
 from reforge.dissect import scapy_tree
+from reforge.gui.errors import explain
 
 
 def _L(layer: str, **fields) -> dict:
@@ -237,7 +238,7 @@ class BuilderPanel(QWidget):
             n = sender.inject(iface, data, self.count.value(), interval, self.l2.isChecked())
             self.status.setText(f"Sent {n} packet(s) on {iface}.")
         except Exception as exc:
-            QMessageBox.critical(self, "Send error", str(exc))
+            QMessageBox.critical(self, "Send error", explain(exc))
 
     def _send_receive(self) -> None:
         data = self._current_bytes()
@@ -247,7 +248,7 @@ class BuilderPanel(QWidget):
         try:
             reply = sender.send_receive(iface, data, timeout=2.0, l2=self.l2.isChecked())
         except Exception as exc:
-            QMessageBox.critical(self, "Send error", str(exc))
+            QMessageBox.critical(self, "Send error", explain(exc))
             return
         if reply is None:
             self.status.setText("Sent; no reply.")
@@ -270,7 +271,7 @@ class BuilderPanel(QWidget):
                 sender.inject(iface, mutate(data, mutations=3), 1, 0.0, self.l2.isChecked())
             self.status.setText(f"Fuzz-sent {self.count.value()} mutated variant(s) on {iface}.")
         except Exception as exc:
-            QMessageBox.critical(self, "Send error", str(exc))
+            QMessageBox.critical(self, "Send error", explain(exc))
 
     def _evade_send(self) -> None:
         data = self._current_bytes()
@@ -288,7 +289,7 @@ class BuilderPanel(QWidget):
                 sender.inject(iface, f, 1, 0.0, self.l2.isChecked())
             self.status.setText(f"Sent {len(frames)} frame(s) via '{technique}' on {iface}.")
         except Exception as exc:
-            QMessageBox.critical(self, "Evasion error", str(exc))
+            QMessageBox.critical(self, "Evasion error", explain(exc))
 
     def _load_protocol(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Load protocol (JSON)", "", "JSON (*.json)")
