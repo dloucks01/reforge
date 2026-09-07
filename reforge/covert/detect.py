@@ -38,7 +38,7 @@ def _first(field):
 
 
 def detect(pkts, dns_label_min: int = 20, dns_entropy_min: float = 3.3,
-           icmp_size_min: int = 16, icmp_entropy_min: float = 5.5) -> list[Finding]:
+           icmp_size_min: int = 16, icmp_entropy_min: float = 4.5) -> list[Finding]:
     from scapy.layers.dns import DNS
     from scapy.layers.inet import ICMP
     from scapy.packet import Raw

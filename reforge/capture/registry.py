@@ -10,12 +10,15 @@ from reforge.capture.afpacket import AfPacketBackend
 from reforge.capture.base import CaptureBackend
 from reforge.capture.pcap import PcapFileBackend
 from reforge.capture.perf_backends import AfXdpBackend, DpdkBackend, PfRingBackend
+from reforge.capture.rawsocket import RawSocketBackend
 
-# Ordered from most-compatible to fastest. AF_PACKET (live) and pcap (offline)
-# have full data planes; the performance backends detect host capability and
-# need the fast-path component to actually run (see docs/DEPLOYMENT.md).
+# Ordered from most-compatible to fastest. AF_PACKET (live), raw AF_PACKET
+# (bytes-level), and pcap (offline) have full data planes; the kernel-bypass
+# backends detect host capability and need the fast-path component to actually
+# run (see docs/DEPLOYMENT.md).
 _REGISTRY: list[type[CaptureBackend]] = [
     AfPacketBackend,
+    RawSocketBackend,
     PcapFileBackend,
     AfXdpBackend,
     PfRingBackend,
@@ -27,7 +30,8 @@ _PLANNED = [
 ]
 
 # Rough speed ceilings (Mbps) per backend, for recommend_backend().
-_SPEED_CEILING = {"af_packet": 2000, "af_xdp": 40000, "pf_ring": 100000, "dpdk": 100000}
+_SPEED_CEILING = {"af_packet": 2000, "raw_afpacket": 5000,
+                  "af_xdp": 40000, "pf_ring": 100000, "dpdk": 100000}
 
 
 def recommend_backend(link_mbps: int) -> str:
@@ -36,7 +40,7 @@ def recommend_backend(link_mbps: int) -> str:
     Prefers AF_PACKET when it's fast enough (no special setup), stepping up to
     faster backends only when the link demands it and the host supports them.
     """
-    order = ["af_packet", "af_xdp", "pf_ring", "dpdk"]
+    order = ["af_packet", "raw_afpacket", "af_xdp", "pf_ring", "dpdk"]
     available = {name for name, ok, _ in list_backends() if ok}
     for name in order:
         if _SPEED_CEILING.get(name, 0) >= link_mbps and name in available:

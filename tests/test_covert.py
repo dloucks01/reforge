@@ -57,12 +57,12 @@ def test_detect_dns_tunnel():
 
 
 def test_detect_icmp_exfil():
-    import os
-
     from scapy.layers.inet import ICMP, IP
     from scapy.packet import Raw
 
-    pkts = [IP(dst="8.8.8.8") / ICMP() / Raw(os.urandom(48)) for _ in range(5)]
+    # deterministic high-entropy payload (64 distinct bytes -> 6 bits/byte)
+    payload = bytes(range(64))
+    pkts = [IP(dst="8.8.8.8") / ICMP() / Raw(payload) for _ in range(5)]
     findings = detect.detect(pkts)
     assert any(f.channel == "icmp-exfil" for f in findings)
 
