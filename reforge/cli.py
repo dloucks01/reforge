@@ -44,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
     br.add_argument("--fix-checksums", action="store_true",
                     help="recompute IP/TCP/UDP checksums on every forwarded packet")
 
+    sc = sub.add_parser("scenario", help="run a scripted engagement scenario + report")
+    sc.add_argument("file", help="scenario file (.json / .yaml)")
+    sc.add_argument("--dry-run", action="store_true", help="validate + log without attacking")
+    sc.add_argument("--json", action="store_true", help="emit the report as JSON")
+    sc.add_argument("--out", metavar="FILE", help="write the report to a file")
+
     return p
 
 
@@ -73,6 +79,21 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "bridge":
         return _run_bridge(args)
+
+    if command == "scenario":
+        from reforge.scenario.runner import ScenarioRunner, load_scenario
+
+        spec = load_scenario(args.file)
+        report = ScenarioRunner(dry_run=args.dry_run).run(spec)
+        text = report.to_json() if args.json else report.to_markdown()
+        if args.out:
+            from pathlib import Path
+
+            Path(args.out).write_text(text)
+            print(f"report written to {args.out}")
+        else:
+            print(text)
+        return 0
 
     return 1
 

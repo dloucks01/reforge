@@ -1,0 +1,12 @@
+{
+  "name": "example-engagement",
+  "steps": [
+    {"type": "note", "params": {"text": "Authorized test — lab segment 10.0.0.0/24"}},
+    {"type": "arp_spoof", "params": {"iface": "eth0", "victim": "10.0.0.5", "gateway": "10.0.0.1"}},
+    {"type": "dns_spoof", "params": {"iface": "eth0", "hostmap": {"*.corp.local": "10.0.0.66"}}},
+    {"type": "sleep", "params": {"seconds": 0}},
+    {"type": "scan", "params": {"target": "10.0.0.0/29", "ports": "22,80,139,443,445,3389"}},
+    {"type": "analyze_pcap", "params": {"file": "capture.pcap"}}
+  ],
+  "run_seconds": 0
+}

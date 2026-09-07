@@ -53,7 +53,7 @@ This is a strong **inline manipulation core**. The gaps below are mostly
    anomaly baselining.
 8. **Active probing/scanning module** — DELIVERED (reforge/scan/): host/port/service discovery driven by the
    crafting engine (SYN/UDP/ARP sweeps, service probes), feeding the target list.
-9. **Automation & scenario API:** headless campaign orchestration, scripted
+9. **Automation & scenario API** — DELIVERED (reforge/scenario/): headless campaign orchestration, scripted
    attack chains, MITRE ATT&CK technique mapping, richer engagement reporting.
 
 ### Tier 3 — larger/independent efforts
