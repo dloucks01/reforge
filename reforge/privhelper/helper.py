@@ -52,7 +52,14 @@ class Helper:
         if HELPER_SOCKET.exists():
             HELPER_SOCKET.unlink()
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as srv:
-            srv.bind(str(HELPER_SOCKET))
+            # Create the socket with restrictive perms from the start — a
+            # bind-then-chmod leaves a race window where a non-root local process
+            # could connect and drive privileged network changes.
+            old_umask = os.umask(0o077)
+            try:
+                srv.bind(str(HELPER_SOCKET))
+            finally:
+                os.umask(old_umask)
             os.chmod(HELPER_SOCKET, 0o600)
             srv.listen(4)
             log.info("privileged helper listening on %s", HELPER_SOCKET)

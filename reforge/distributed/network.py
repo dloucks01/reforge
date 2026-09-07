@@ -1,4 +1,11 @@
-"""Network transport for sensors → collector (local/airgapped TCP, JSON lines)."""
+"""Network transport for sensors → collector (local/airgapped TCP, JSON lines).
+
+SECURITY: this transport is unauthenticated and unencrypted. Bind the collector
+to loopback (the default) or a trusted management segment only; for sensors on a
+separate host, tunnel the connection (SSH/WireGuard). An attacker who can reach
+an exposed collector port can inject false observations or read reported
+credentials in transit. Do not bind to an untrusted network without a tunnel.
+"""
 
 from __future__ import annotations
 

@@ -10,8 +10,11 @@ For authorized testing only.
 
 from __future__ import annotations
 
+import atexit
 import datetime
 import ipaddress
+import os
+import shutil
 import ssl
 import tempfile
 from pathlib import Path
@@ -52,8 +55,12 @@ class DynamicCA:
         )
         self._cert_cache: dict[str, tuple[bytes, bytes]] = {}
         self._ctx_cache: dict[str, ssl.SSLContext] = {}
+        # 0700 dir (mkdtemp default) holds the per-host leaf keys ssl must load
+        # from files; cleaned up on exit. The CA private key stays in memory and
+        # is never written to disk.
         self._tmp = Path(tempfile.mkdtemp(prefix="reforge-tls-"))
         self._key_size = key_size
+        atexit.register(self.close)
 
     def ca_pem(self) -> bytes:
         return self.ca_cert.public_bytes(serialization.Encoding.PEM)
@@ -102,6 +109,10 @@ class DynamicCA:
         key_f = self._tmp / f"{host}.key"
         cert_f.write_bytes(cert_pem)
         key_f.write_bytes(key_pem)
+        try:
+            os.chmod(key_f, 0o600)          # restrict the private key explicitly
+        except OSError:
+            pass
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(str(cert_f), str(key_f))
         self._ctx_cache[host] = ctx
@@ -111,3 +122,7 @@ class DynamicCA:
         p = Path(path)
         p.write_bytes(self.ca_pem())
         return p
+
+    def close(self) -> None:
+        """Remove the temp dir holding the leaf private keys."""
+        shutil.rmtree(self._tmp, ignore_errors=True)
