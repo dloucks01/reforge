@@ -51,7 +51,7 @@ This is a strong **inline manipulation core**. The gaps below are mostly
 7. **Passive intelligence / recon** — DELIVERED (reforge/recon/): p0f-style OS + service/version fingerprint,
    asset discovery & network mapping from observed traffic, flow analytics,
    anomaly baselining.
-8. **Active probing/scanning module:** host/port/service discovery driven by the
+8. **Active probing/scanning module** — DELIVERED (reforge/scan/): host/port/service discovery driven by the
    crafting engine (SYN/UDP/ARP sweeps, service probes), feeding the target list.
 9. **Automation & scenario API:** headless campaign orchestration, scripted
    attack chains, MITRE ATT&CK technique mapping, richer engagement reporting.

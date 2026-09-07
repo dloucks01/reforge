@@ -47,6 +47,7 @@ from reforge.gui.fuzzing_panel import FuzzingPanel
 from reforge.gui.intercept_panel import InterceptPanel
 from reforge.gui.recon_panel import ReconPanel
 from reforge.gui.rules_panel import RulesPanel
+from reforge.gui.scan_panel import ScanPanel
 
 from reforge.capture.afpacket import AfPacketBackend
 from reforge.capture.base import Frame
@@ -244,6 +245,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.fuzz_panel, "Fuzzing")
         self.attacks_panel = AttacksPanel()
         self.tabs.addTab(self.attacks_panel, "Attacks")
+        self.scan_panel = ScanPanel(get_inventory=lambda: self.recon_panel.inv)
+        self.tabs.addTab(self.scan_panel, "Scan")
         self.setCentralWidget(self.tabs)
 
     def _bridge_ifaces(self) -> list[str]:
