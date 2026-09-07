@@ -90,7 +90,44 @@ class MainWindow(QMainWindow):
         self.timer.setInterval(100)
         self.timer.timeout.connect(self._drain)
 
+        self._load_settings()                 # restore last-used inputs
         self.statusBar().showMessage("Idle — open a pcap or start a live capture")
+
+    # ---- remembered settings ------------------------------------------------
+    def _state_widgets(self) -> dict:
+        """Inputs whose last-used value is remembered between runs (never secrets)."""
+        a, sc, ic, bd = (self.attacks_panel, self.scan_panel,
+                         self.intercept_panel, self.builder_panel)
+        return {
+            "toolbar/iface": self.iface_combo, "toolbar/peer": self.peer_combo,
+            "toolbar/mode": self.mode_combo, "toolbar/bpf": self.bpf_edit,
+            "scan/target": sc.target, "scan/ports": sc.ports, "scan/mode": sc.mode,
+            "scan/banners": sc.banners,
+            "intercept/limit": ic.limit_spin, "intercept/autorel": ic.autorel_spin,
+            "intercept/overflow": ic.overflow_combo, "intercept/filter": ic.filter_edit,
+            "attacks/tp_port": a.tp_port, "attacks/tp_target": a.tp_target,
+            "attacks/tp_sslstrip": a.tp_sslstrip, "attacks/tp_stripenc": a.tp_stripenc,
+            "attacks/tp_cookie": a.tp_cookie, "attacks/tp_inject": a.tp_inject,
+            "attacks/tp_int_keyword": a.tp_int_keyword, "attacks/tp_int_dir": a.tp_int_dir,
+            "builder/iface": bd.iface, "builder/count": bd.count,
+            "builder/interval": bd.interval, "builder/l2": bd.l2,
+        }
+
+    def _load_settings(self) -> None:
+        from reforge.gui.settings import load_all
+
+        try:
+            load_all(self._state_widgets())
+        except Exception:
+            log.debug("settings load failed", exc_info=True)
+
+    def _save_settings(self) -> None:
+        from reforge.gui.settings import save_all
+
+        try:
+            save_all(self._state_widgets())
+        except Exception:
+            log.debug("settings save failed", exc_info=True)
 
     # ---- layout -------------------------------------------------------------
     def _build_toolbar(self) -> None:
@@ -763,6 +800,7 @@ class MainWindow(QMainWindow):
                     item.setForeground(brush)
 
     def closeEvent(self, event) -> None:
+        self._save_settings()                 # remember last-used inputs
         self.stop_capture()
         for cleanup in (self.attacks_panel.stop_all, self.console_panel.stop):
             try:

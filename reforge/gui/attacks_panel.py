@@ -28,6 +28,23 @@ def _ifaces():
     return list_interfaces() or ["<none>"]
 
 
+# TCP-proxy quick setups: (label, full config of the proxy's toggles/fields)
+def _setup(sslstrip=False, stripenc=False, cookie=False, inject="",
+           intercept=False, keyword="", direction="both") -> dict:
+    return {"sslstrip": sslstrip, "stripenc": stripenc, "cookie": cookie,
+            "inject": inject, "intercept": intercept, "keyword": keyword, "dir": direction}
+
+
+_QUICK_SETUPS = [
+    ("Clear", _setup()),
+    ("sslstrip (downgrade HTTPS)", _setup(sslstrip=True, stripenc=True)),
+    ("Steal secure cookies", _setup(stripenc=True, cookie=True)),
+    ("Full rewrite", _setup(sslstrip=True, stripenc=True, cookie=True)),
+    ("Hold logins for edit", _setup(stripenc=True, intercept=True,
+                                    keyword="login", direction="requests")),
+]
+
+
 class AttacksPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -336,7 +353,13 @@ class AttacksPanel(QWidget):
         self.tp_target = QLineEdit(); self.tp_target.setPlaceholderText("upstream host:port (blank = SO_ORIGINAL_DST)")
         b_start = QPushButton("Start"); b_start.clicked.connect(self._tcp_start)
         b_stop = QPushButton("Stop"); b_stop.clicked.connect(self._tcp_stop)
-        for w in (QLabel("Listen:"), self.tp_port, QLabel("Upstream:"), self.tp_target, b_start, b_stop):
+        self.tp_quick = QComboBox(); self.tp_quick.addItem("Quick setup…")
+        for label, _cfg in _QUICK_SETUPS:
+            self.tp_quick.addItem(label)
+        self.tp_quick.setToolTip("Configure the proxy for a common scenario")
+        self.tp_quick.activated.connect(self._apply_quick_setup)
+        for w in (QLabel("Listen:"), self.tp_port, QLabel("Upstream:"), self.tp_target,
+                  self.tp_quick, b_start, b_stop):
             row.addWidget(w)
         v.addLayout(row)
         row2 = QHBoxLayout()
@@ -361,6 +384,20 @@ class AttacksPanel(QWidget):
         self.tp_status = QLabel("idle — redirect victim HTTP → listen port")
         v.addWidget(self.tp_status)
         return box
+
+    def _apply_quick_setup(self, index: int) -> None:
+        if index <= 0:
+            return
+        cfg = _QUICK_SETUPS[index - 1][1]
+        self.tp_sslstrip.setChecked(cfg["sslstrip"])
+        self.tp_stripenc.setChecked(cfg["stripenc"])
+        self.tp_cookie.setChecked(cfg["cookie"])
+        self.tp_inject.setText(cfg["inject"])
+        self.tp_intercept.setChecked(cfg["intercept"])
+        self.tp_int_keyword.setText(cfg["keyword"])
+        self.tp_int_dir.setCurrentText(cfg["dir"])
+        self.tp_quick.setCurrentIndex(0)            # behave like a menu
+        self.tp_status.setText(f"Configured: {_QUICK_SETUPS[index - 1][0]} — set upstream, Start.")
 
     def _build_interceptor(self):
         """A MessageInterceptor sharing the Intercept tab's queue, if enabled."""

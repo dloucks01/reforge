@@ -201,3 +201,37 @@ def test_scan_port_presets(app):
     sp._apply_port_preset(2)
     assert sp.ports.text() == _PORT_SETS[1][1]
     assert sp.port_preset.currentIndex() == 0
+
+
+def test_attacks_quick_setups(app):
+    from reforge.gui.attacks_panel import _QUICK_SETUPS, AttacksPanel
+
+    ap = AttacksPanel()
+    ap._apply_quick_setup(2)                        # sslstrip
+    assert ap.tp_sslstrip.isChecked() and ap.tp_stripenc.isChecked()
+    assert not ap.tp_cookie.isChecked() and ap.tp_quick.currentIndex() == 0
+    ap._apply_quick_setup(len(_QUICK_SETUPS))       # Hold logins for edit
+    assert ap.tp_intercept.isChecked() and ap.tp_int_keyword.text() == "login"
+    assert ap.tp_int_dir.currentText() == "requests"
+
+
+def test_remembered_settings_roundtrip(app):
+    from reforge.gui.main_window import MainWindow
+    from reforge.gui.settings import settings
+
+    settings().clear()
+    w = MainWindow()
+    w.scan_panel.ports.setText("1-1024")
+    w.scan_panel.target.setText("10.0.0.0/24")
+    w.intercept_panel.limit_spin.setValue(7)
+    w.intercept_panel.filter_edit.setText("TCP.dport == 443")
+    w.bpf_edit.setText("tcp port 80")
+    w._save_settings()
+
+    w2 = MainWindow()                               # fresh window restores them
+    assert w2.scan_panel.ports.text() == "1-1024"
+    assert w2.scan_panel.target.text() == "10.0.0.0/24"
+    assert w2.intercept_panel.limit_spin.value() == 7
+    assert w2.intercept_panel.filter_edit.text() == "TCP.dport == 443"
+    assert w2.bpf_edit.text() == "tcp port 80"
+    assert not w2.intercept_panel.enable_check.isChecked()   # never auto-arms intercept
