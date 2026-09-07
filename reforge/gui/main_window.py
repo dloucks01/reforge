@@ -39,7 +39,9 @@ from PySide6.QtWidgets import (
 from reforge.core.intercept import InterceptQueue
 from reforge.core.packet import Packet
 from reforge.gui import theme
+from reforge.gui.attacks_panel import AttacksPanel
 from reforge.gui.builder_panel import BuilderPanel
+from reforge.gui.creds_panel import CredsPanel
 from reforge.gui.diagnostics_panel import DiagnosticsPanel
 from reforge.gui.fuzzing_panel import FuzzingPanel
 from reforge.gui.intercept_panel import InterceptPanel
@@ -239,6 +241,8 @@ class MainWindow(QMainWindow):
             get_selected_packet=self._selected_packet_bytes,
         )
         self.tabs.addTab(self.fuzz_panel, "Fuzzing")
+        self.attacks_panel = AttacksPanel()
+        self.tabs.addTab(self.attacks_panel, "Attacks")
         self.setCentralWidget(self.tabs)
 
     def _bridge_ifaces(self) -> list[str]:
@@ -271,6 +275,12 @@ class MainWindow(QMainWindow):
         intercept_dock.setWidget(self.intercept_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, intercept_dock)
         self.tabifyDockWidget(rules_dock, intercept_dock)
+
+        creds_dock = QDockWidget("Creds", self)
+        self.creds_panel = CredsPanel()
+        creds_dock.setWidget(self.creds_panel)
+        self.addDockWidget(Qt.RightDockWidgetArea, creds_dock)
+        self.tabifyDockWidget(intercept_dock, creds_dock)
         rules_dock.raise_()
 
     # ---- capture control ----------------------------------------------------
@@ -449,6 +459,9 @@ class MainWindow(QMainWindow):
                 item.setFont(self._mono_small)
             self.table.setItem(r, c, item)
 
+        # passively harvest credentials from every captured frame
+        self.creds_panel.add_from_frame(frame.data)
+
     def _on_select(self) -> None:
         rows = self.table.selectionModel().selectedRows()
         if not rows:
@@ -594,6 +607,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt signature)
         self.stop_capture()
+        try:
+            self.attacks_panel.stop_all()
+        except Exception:
+            pass
         super().closeEvent(event)
 
 

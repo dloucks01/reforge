@@ -35,7 +35,7 @@ def test_define_and_use_custom_protocol():
     # build a packet using it and dissect back
     craft = {"layers": [
         {"layer": "IP", "fields": {"dst": "10.0.0.1"}},
-        {"layer": "UDP", "fields": {"dport": 9999}},
+        {"layer": "UDP", "fields": {"sport": 40000, "dport": 9999}},
         {"layer": "MyProto", "fields": {"opcode": 7, "token": "ABCD"}},
     ]}
     data = builder.spec_to_bytes(craft)
@@ -50,7 +50,7 @@ def test_custom_protocol_field_rule():
     define_protocol({"name": "Widget",
                      "fields": [{"name": "kind", "type": "u8"}],
                      "bind": {"over": "UDP", "dport": 8100}})
-    raw = bytes(Ether() / IP(dst="10.0.0.1") / UDP(dport=8100) / b"\x05")
+    raw = bytes(Ether() / IP(dst="10.0.0.1") / UDP(sport=40000, dport=8100) / b"\x05")
     pkt = Packet.from_bytes(raw)
     assert M.FieldMatch("Widget", "kind", "eq", 5).matches(pkt)
 
@@ -67,7 +67,7 @@ def test_mutate_is_deterministic_and_length_preserving():
 def test_fuzz_action_mutates_payload():
     engine = RuleEngine([Rule("f", M.AllMatch(),
                               [S.build_action({"type": "fuzz", "mutations": 4, "seed": 7})])])
-    raw = bytes(Ether() / IP(dst="10.0.0.1") / UDP(dport=1) / (b"PAYLOAD-DATA"))
+    raw = bytes(Ether() / IP(dst="10.0.0.1") / UDP(sport=40000, dport=1) / (b"PAYLOAD-DATA"))
     res = apply_engine(engine, raw)
     assert res.modified
     from scapy.packet import Raw

@@ -53,11 +53,24 @@ class Fuzz(Action):
     seed: int | None = None
 
     def apply(self, pkt, verdict: Verdict) -> None:
+        from scapy.layers.inet import TCP, UDP
         from scapy.packet import Raw
 
         p = pkt.scapy()
-        if not p.haslayer(Raw):
+        if p.haslayer(Raw):
+            p[Raw].load = mutate(bytes(p[Raw].load), self.mutations, self.seed)
+            pkt.modified = True
+            verdict.notes.append(f"fuzz x{self.mutations}")
             return
-        p[Raw].load = mutate(bytes(p[Raw].load), self.mutations, self.seed)
-        pkt.modified = True
-        verdict.notes.append(f"fuzz x{self.mutations}")
+        # No Raw layer (e.g. the payload dissected as a protocol) — fuzz the
+        # bytes of the transport payload directly.
+        for l4 in (TCP, UDP):
+            if p.haslayer(l4):
+                layer = p[l4]
+                payload = bytes(layer.payload)
+                if payload:
+                    layer.remove_payload()
+                    layer.add_payload(Raw(mutate(payload, self.mutations, self.seed)))
+                    pkt.modified = True
+                    verdict.notes.append(f"fuzz x{self.mutations}")
+                return
