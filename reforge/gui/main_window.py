@@ -26,15 +26,12 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPlainTextEdit,
     QSplitter,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
     QToolButton,
-    QTreeWidget,
-    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -228,16 +225,6 @@ class MainWindow(QMainWindow):
         hdr.setSectionResizeMode(5, QHeaderView.Fixed)
         self.table.itemSelectionChanged.connect(self._on_select)
 
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Field", "Value"])
-        self.tree.setAlternatingRowColors(True)
-        self.tree.setColumnWidth(0, 210)
-        mono = QFont("monospace")
-        mono.setStyleHint(QFont.Monospace)
-        self.hex = QPlainTextEdit()
-        self.hex.setReadOnly(True)
-        self.hex.setFont(mono)
-
         # capability panels (single-instance; composed into workspaces)
         self.builder_panel = BuilderPanel(get_selected_packet=self._selected_packet_bytes)
         self.diag_panel = DiagnosticsPanel(
@@ -376,24 +363,13 @@ class MainWindow(QMainWindow):
         return h
 
     def _ws_live(self) -> QWidget:
-        detail = QSplitter(Qt.Horizontal)
-        detail.addWidget(self.tree)
-        detail.addWidget(self.hex)
-        detail.setSizes([420, 520])
-
-        right = QTabWidget()
-        right.addTab(self.intercept_panel, "Intercept")
-        right.addTab(self.rules_panel, "Rules")
-
-        lower = QSplitter(Qt.Horizontal)
-        lower.addWidget(detail)
-        lower.addWidget(right)
-        lower.setSizes([560, 640])
-
+        lower = QTabWidget()
+        lower.addTab(self.intercept_panel, "Intercept")
+        lower.addTab(self.rules_panel, "Rules")
         outer = QSplitter(Qt.Vertical)
         outer.addWidget(self.table)
         outer.addWidget(lower)
-        outer.setSizes([300, 520])
+        outer.setSizes([260, 560])
         return self._ws("live", outer)
 
     def _ws_recon(self) -> QWidget:
@@ -642,8 +618,7 @@ class MainWindow(QMainWindow):
 
     def clear(self) -> None:
         self.table.setRowCount(0)
-        self.tree.clear()
-        self.hex.clear()
+        self.intercept_panel.set_original(b"")
         self.packets.clear()
         self._t0 = None
 
@@ -755,30 +730,7 @@ class MainWindow(QMainWindow):
         if idx >= len(self.packets):
             return
         _ts, frame = self.packets[idx]
-        self._show_detail(frame)
-
-    def _show_detail(self, frame: Frame) -> None:
-        from scapy.layers.l2 import Ether
-
-        self.tree.clear()
-        bold = QFont()
-        bold.setBold(True)
-        try:
-            pkt = Ether(frame.data)
-            for layer in scapy_tree.to_tree(pkt):
-                parent = QTreeWidgetItem([layer.name, ""])
-                parent.setFont(0, bold)
-                parent.setForeground(0, QBrush(QColor(theme.proto_color(layer.name))))
-                for f in layer.fields:
-                    child = QTreeWidgetItem([f.name, f.human])
-                    child.setForeground(0, QBrush(QColor(theme.TEXT_MUTED)))
-                    parent.addChild(child)
-                self.tree.addTopLevelItem(parent)
-                parent.setExpanded(True)
-        except Exception as exc:
-            self.tree.addTopLevelItem(QTreeWidgetItem(["error", str(exc)]))
-
-        self.hex.setPlainText("\n".join(scapy_tree.hexdump_lines(frame.data)))
+        self.intercept_panel.set_original(frame.data)
 
     # ---- misc ---------------------------------------------------------------
     def export_pcap(self) -> None:

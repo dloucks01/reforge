@@ -152,6 +152,7 @@ class InterceptPanel(QWidget):
 
         split = QSplitter(Qt.Vertical)
 
+        # held queue
         self.table = QTableWidget(0, len(HELD_COLUMNS))
         self.table.setHorizontalHeaderLabels(HELD_COLUMNS)
         self.table.verticalHeader().setVisible(False)
@@ -162,31 +163,68 @@ class InterceptPanel(QWidget):
         self.table.itemSelectionChanged.connect(self._on_select)
         split.addWidget(self.table)
 
+        mono = QFont("JetBrains Mono")
+        mono.setStyleHint(QFont.Monospace)
+
+        # editor: Original (read-only) stacked over Modified (editable); controls docked right
         editor = QWidget()
         elayout = QVBoxLayout(editor)
         elayout.setContentsMargins(0, 0, 0, 0)
+        elayout.setSpacing(4)
 
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Field", "Value (double-click to edit)"])
-        self.tree.setColumnWidth(0, 220)
-        self.tree.itemChanged.connect(self._on_field_edited)
-        elayout.addWidget(self.tree)
+        body = QSplitter(Qt.Horizontal)
+        stackcol = QSplitter(Qt.Vertical)
 
-        # raw editor with a Hex / ASCII view toggle
-        vrow = QHBoxLayout()
-        vrow.addWidget(QLabel("Raw:"))
-        self.view_combo = QComboBox(); self.view_combo.addItems(["Hex", "ASCII"])
+        obox = QWidget()
+        ob = QVBoxLayout(obox); ob.setContentsMargins(0, 0, 0, 0); ob.setSpacing(2)
+        ob.addWidget(self._section("Original \u2014 read-only"))
+        osplit = QSplitter(Qt.Horizontal)
+        self.orig_tree = QTreeWidget()
+        self.orig_tree.setHeaderLabels(["Field", "Value"])
+        self.orig_tree.setColumnWidth(0, 170)
+        self.orig_hex = QPlainTextEdit()
+        self.orig_hex.setReadOnly(True)
+        self.orig_hex.setFont(mono)
+        osplit.addWidget(self.orig_tree)
+        osplit.addWidget(self.orig_hex)
+        osplit.setSizes([300, 340])
+        ob.addWidget(osplit)
+        stackcol.addWidget(obox)
+
+        mbox = QWidget()
+        mb = QVBoxLayout(mbox); mb.setContentsMargins(0, 0, 0, 0); mb.setSpacing(2)
+        mrow = QHBoxLayout(); mrow.setContentsMargins(0, 0, 0, 0)
+        mrow.addWidget(self._section("Modified \u2014 editable"))
+        mrow.addStretch(1)
+        mrow.addWidget(QLabel("Raw:"))
+        self.view_combo = QComboBox()
+        self.view_combo.addItems(["Hex", "ASCII"])
         self.view_combo.setToolTip("Edit the raw bytes as hex or as ASCII/latin-1 text")
         self.view_combo.currentTextChanged.connect(self._on_view_changed)
-        vrow.addWidget(self.view_combo)
-        vrow.addStretch(1)
-        elayout.addLayout(vrow)
-
-        mono = QFont("JetBrains Mono"); mono.setStyleHint(QFont.Monospace)
+        mrow.addWidget(self.view_combo)
+        mb.addLayout(mrow)
         self.hex_edit = QPlainTextEdit()
         self.hex_edit.setFont(mono)
-        self.hex_edit.setPlaceholderText("raw bytes (editable) — switch Hex/ASCII, then Apply")
-        elayout.addWidget(self.hex_edit)
+        self.hex_edit.setPlaceholderText(
+            "select a held packet to edit \u2014 switch Hex/ASCII, then Apply")
+        mb.addWidget(self.hex_edit)
+        stackcol.addWidget(mbox)
+        stackcol.setSizes([210, 240])
+        body.addWidget(stackcol)
+
+        cbox = QWidget()
+        cb = QVBoxLayout(cbox); cb.setContentsMargins(0, 0, 0, 0); cb.setSpacing(2)
+        cb.addWidget(self._section("Fields"))
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Field", "Value"])
+        self.tree.setColumnWidth(0, 110)
+        self.tree.itemChanged.connect(self._on_field_edited)
+        cb.addWidget(self.tree)
+        cbox.setMinimumWidth(190)
+        cbox.setMaximumWidth(280)
+        body.addWidget(cbox)
+        body.setSizes([660, 240])
+        elayout.addWidget(body, 1)
 
         buttons = QHBoxLayout()
         self.btn_apply = QPushButton("Apply")
@@ -211,9 +249,35 @@ class InterceptPanel(QWidget):
         elayout.addLayout(buttons)
 
         split.addWidget(editor)
-        split.setSizes([180, 360])
-        root.addWidget(split)
+        split.setSizes([140, 430])
+        root.addWidget(split, 1)
         self._set_buttons_enabled(False)
+
+    def _section(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: palette(mid); font-size: 10px; font-weight: 600; "
+                          "letter-spacing: 0.05em;")
+        return lbl
+
+    def set_original(self, data: bytes) -> None:
+        """Show a packet in the read-only Original view (inspection + intercept)."""
+        if not data:
+            self.orig_tree.clear()
+            self.orig_hex.clear()
+            return
+        self.orig_hex.setPlainText("\n".join(scapy_tree.hexdump_lines(data)))
+        self.orig_tree.clear()
+        try:
+            from scapy.layers.l2 import Ether
+
+            for layer in scapy_tree.to_tree(Ether(data)):
+                parent = QTreeWidgetItem([layer.name, ""])
+                for f in layer.fields:
+                    parent.addChild(QTreeWidgetItem([f.name, f.human]))
+                self.orig_tree.addTopLevelItem(parent)
+                parent.setExpanded(True)
+        except Exception:
+            pass
 
     # ---- intercept filter / search -----------------------------------------
     def set_transform_count(self, n: int) -> None:
@@ -350,6 +414,7 @@ class InterceptPanel(QWidget):
         self.view_combo.setCurrentText("ASCII" if self._view == "ascii" else "Hex")
         self.view_combo.blockSignals(False)
         self.tree.setVisible(hp.kind != "message")
+        self.set_original(hp.data)
         self._set_work_bytes(hp.data)
         self._set_buttons_enabled(True)
 

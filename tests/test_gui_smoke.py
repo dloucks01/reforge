@@ -41,8 +41,9 @@ def test_window_builds_and_appends(app):
     # Selecting the row populates tree + hex.
     win.table.selectRow(0)
     win._on_select()
-    assert win.tree.topLevelItemCount() >= 3          # Ether/IP/TCP
-    assert win.hex.toPlainText().startswith("00000000")
+    ip = win.intercept_panel  # selection feeds the intercept panel's Original view
+    assert ip.orig_tree.topLevelItemCount() >= 3      # Ether/IP/TCP
+    assert ip.orig_hex.toPlainText().startswith("00000000")
     win.close()
 
 
