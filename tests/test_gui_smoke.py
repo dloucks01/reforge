@@ -235,3 +235,57 @@ def test_remembered_settings_roundtrip(app):
     assert w2.intercept_panel.filter_edit.text() == "TCP.dport == 443"
     assert w2.bpf_edit.text() == "tcp port 80"
     assert not w2.intercept_panel.enable_check.isChecked()   # never auto-arms intercept
+
+
+def test_bridge_start_keeps_intercept_and_engine(app, monkeypatch):
+    """Regression: _start_service must not wipe the engine/queue start_bridge built."""
+    import reforge.core.bridge as bridgemod
+    from reforge.gui.main_window import MainWindow
+    from reforge.rules.filter import parse_filter
+
+    class FakeBridge:
+        def __init__(self, *a, **k):
+            self.counters = type("C", (), {"as_dict": lambda self: {}})()
+
+        def start(self):
+            return 0
+
+        def stop(self):
+            pass
+
+        def drain(self, *a, **k):
+            return []
+
+    monkeypatch.setattr(bridgemod, "UserspaceBridge", FakeBridge)
+
+    w = MainWindow()
+    w.iface_combo.clear(); w.iface_combo.addItems(["eth0", "eth1"])
+    w.peer_combo.clear(); w.peer_combo.addItems(["eth0", "eth1"])
+    w.iface_combo.setCurrentText("eth0"); w.peer_combo.setCurrentText("eth1")
+    w.mode_combo.setCurrentText("Bridge")
+    w.start_bridge()
+
+    assert w.intercept is not None                     # queue survives the start
+    assert w.engine is not None                        # engine survives the start
+    assert w.intercept_panel.queue is w.intercept      # panel shows the live queue
+
+    # a catch filter now installs onto the running engine
+    w._on_intercept_filter(parse_filter("TCP.dport == 80"), "TCP.dport == 80")
+    assert w._INTERCEPT_RULE in [r.name for r in w.engine.rules]
+
+
+def test_intercept_empty_filter_holds_everything(app):
+    from reforge.core.packet import Packet
+    from reforge.gui.intercept_panel import InterceptPanel
+    from scapy.layers.l2 import Ether
+
+    p = InterceptPanel()
+    seen = {}
+    p.on_filter = lambda m, t: seen.update(match=m, text=t)
+    p.filter_edit.setText("")
+    p.enable_check.setChecked(True)                 # enabled + blank = hold all
+    assert seen.get("match") is not None            # a real match, never None(=disable)
+    assert seen["match"].matches(Packet.from_bytes(bytes(Ether()), link="ether"))
+    seen.clear()
+    p.enable_check.setChecked(False)
+    assert seen == {"match": None, "text": ""}      # disabling clears

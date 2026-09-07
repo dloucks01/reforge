@@ -227,7 +227,9 @@ class InterceptPanel(QWidget):
             self.filter_status.setStyleSheet("color: palette(mid);")
             return
         if not text:
-            match = None                       # empty + enabled = hold everything
+            from reforge.rules.matchers import AllMatch
+
+            match = AllMatch()                 # empty + enabled = hold everything
         else:
             try:
                 match = parse_filter(text)

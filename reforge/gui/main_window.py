@@ -400,6 +400,10 @@ class MainWindow(QMainWindow):
             return
         from reforge.core.bridge import UserspaceBridge
 
+        # Tear down any prior service FIRST, then build new engine/intercept state
+        # so _start_service (reset=False) does not wipe what we just created.
+        self.stop_capture()
+        self.clear()
         engine = self.rules_panel.build_engine(dry_run=False)
         self.engine = engine
         self._install_intercept_filter(engine)
@@ -412,7 +416,7 @@ class MainWindow(QMainWindow):
                                  flow_rewrite=self.act_seqfix.isChecked(),
                                  checksum_fixup=self.act_csum.isChecked())
         state = "ARMED" if armed else "pass-through (safe)"
-        self._start_service(bridge, f"bridge {a} <-> {b}  [{state}]")
+        self._start_service(bridge, f"bridge {a} <-> {b}  [{state}]", reset=False)
 
     def open_pcap(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -422,10 +426,14 @@ class MainWindow(QMainWindow):
             return
         self._start_service(CaptureService(PcapFileBackend(path)), f"pcap {path}")
 
-    def _start_service(self, service, label: str) -> None:
-        """Start any capture-like service (CaptureService or UserspaceBridge)."""
-        self.stop_capture()
-        self.clear()
+    def _start_service(self, service, label: str, reset: bool = True) -> None:
+        """Start any capture-like service (CaptureService or UserspaceBridge).
+
+        reset=False when the caller has already torn down the prior service and
+        set up new engine/intercept state that must survive (see start_bridge)."""
+        if reset:
+            self.stop_capture()
+            self.clear()
         self.service = service
         try:
             self.service.start()
