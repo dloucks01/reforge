@@ -45,6 +45,7 @@ from reforge.gui.creds_panel import CredsPanel
 from reforge.gui.diagnostics_panel import DiagnosticsPanel
 from reforge.gui.fuzzing_panel import FuzzingPanel
 from reforge.gui.intercept_panel import InterceptPanel
+from reforge.gui.recon_panel import ReconPanel
 from reforge.gui.rules_panel import RulesPanel
 
 from reforge.capture.afpacket import AfPacketBackend
@@ -281,6 +282,12 @@ class MainWindow(QMainWindow):
         creds_dock.setWidget(self.creds_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, creds_dock)
         self.tabifyDockWidget(intercept_dock, creds_dock)
+
+        recon_dock = QDockWidget("Recon", self)
+        self.recon_panel = ReconPanel()
+        recon_dock.setWidget(self.recon_panel)
+        self.addDockWidget(Qt.RightDockWidgetArea, recon_dock)
+        self.tabifyDockWidget(creds_dock, recon_dock)
         rules_dock.raise_()
 
     # ---- capture control ----------------------------------------------------
@@ -391,6 +398,7 @@ class MainWindow(QMainWindow):
         if self.intercept is not None:
             self.intercept_panel.refresh_pending()
         self.diag_panel.refresh_health()
+        self.recon_panel.refresh()
         n = self._flush_rows()
         if n == 0 and not self.service.running:
             self.stop_capture()
@@ -459,8 +467,9 @@ class MainWindow(QMainWindow):
                 item.setFont(self._mono_small)
             self.table.setItem(r, c, item)
 
-        # passively harvest credentials from every captured frame
+        # passively harvest credentials + build the asset inventory
         self.creds_panel.add_from_frame(frame.data)
+        self.recon_panel.add_from_frame(frame.data)
 
     def _on_select(self) -> None:
         rows = self.table.selectionModel().selectedRows()

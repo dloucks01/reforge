@@ -48,7 +48,7 @@ This is a strong **inline manipulation core**. The gaps below are mostly
    STARTTLS downgrade, per-host bypass — unlocks HTTPS manipulation end-to-end.
 6. **IDS/IPS evasion toolkit** (for testing defenses): IP/TCP fragmentation and
    overlap, TTL/segmentation tricks, packet-in-packet, timing/obfuscation.
-7. **Passive intelligence / recon:** p0f-style OS + service/version fingerprint,
+7. **Passive intelligence / recon** — DELIVERED (reforge/recon/): p0f-style OS + service/version fingerprint,
    asset discovery & network mapping from observed traffic, flow analytics,
    anomaly baselining.
 8. **Active probing/scanning module:** host/port/service discovery driven by the
