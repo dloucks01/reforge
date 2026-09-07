@@ -85,7 +85,7 @@ class UserspaceBridge:
                  port_factory=ScapyPort, fail_open: bool = True,
                  tap: bool = True, max_queue: int = 100_000,
                  intercept=None, armed: bool = True, seq_fixup: bool = False,
-                 checksum_fixup: bool = False):
+                 checksum_fixup: bool = False, flow_rewrite: bool = False):
         self.if_a = if_a
         self.if_b = if_b
         self.engine = engine or RuleEngine([])
@@ -96,7 +96,8 @@ class UserspaceBridge:
         self.armed = armed               # False = pure pass-through (safe)
         self.checksum_fixup = checksum_fixup  # recompute checksums on every forward
         self.counters = BridgeCounters()
-        self.set_seq_fixup(seq_fixup)    # optional TCP seq/ack fix-ups
+        # flow_rewrite implies seq fix-ups, position-aware (R3)
+        self.set_seq_fixup(seq_fixup or flow_rewrite, position_aware=flow_rewrite)
 
         self._queue: "Queue[tuple[float, Frame]]" = Queue(maxsize=max_queue)
         self._thread: threading.Thread | None = None
@@ -110,11 +111,22 @@ class UserspaceBridge:
         self._sent: dict[bytes, float] = {}
         self._suppress_ttl = 0.5
 
-    def set_seq_fixup(self, on: bool) -> None:
-        """Enable/disable stateful TCP seq/ack fix-ups (resets flow state)."""
-        from reforge.core.tcpflow import TcpSeqFixer
+    def set_seq_fixup(self, on: bool, position_aware: bool = False) -> None:
+        """Enable/disable stateful TCP seq/ack fix-ups (resets flow state).
 
-        self.seq_fixer = TcpSeqFixer() if on else None
+        position_aware=True uses the R3 FlowRewriter (shifts each segment only by
+        edits before it); otherwise the simpler cumulative TcpSeqFixer.
+        """
+        if not on:
+            self.seq_fixer = None
+        elif position_aware:
+            from reforge.core.flowrewrite import FlowRewriter
+
+            self.seq_fixer = FlowRewriter()
+        else:
+            from reforge.core.tcpflow import TcpSeqFixer
+
+            self.seq_fixer = TcpSeqFixer()
 
     @property
     def seq_fixup(self) -> bool:

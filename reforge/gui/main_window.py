@@ -320,7 +320,7 @@ class MainWindow(QMainWindow):
         self.intercept_panel.set_queue(self.intercept)
         armed = self.act_arm.isChecked()
         bridge = UserspaceBridge(a, b, engine, intercept=self.intercept, armed=armed,
-                                 seq_fixup=self.act_seqfix.isChecked(),
+                                 flow_rewrite=self.act_seqfix.isChecked(),
                                  checksum_fixup=self.act_csum.isChecked())
         state = "ARMED" if armed else "pass-through (safe)"
         self._start_service(bridge, f"bridge {a} <-> {b}  [{state}]")
@@ -407,8 +407,8 @@ class MainWindow(QMainWindow):
 
     def _on_seqfix_toggled(self, on: bool) -> None:
         if self.service is not None and hasattr(self.service, "set_seq_fixup"):
-            self.service.set_seq_fixup(on)
-        self.statusBar().showMessage("TCP seq-fix " + ("ON" if on else "off"))
+            self.service.set_seq_fixup(on, position_aware=True)
+        self.statusBar().showMessage("TCP seq-fix " + ("ON (position-aware)" if on else "off"))
 
     def _on_csum_toggled(self, on: bool) -> None:
         if self.service is not None and hasattr(self.service, "checksum_fixup"):

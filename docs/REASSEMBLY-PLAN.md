@@ -75,7 +75,7 @@ flow eviction · chunked + Content-Length + gzip framing · connection reuse
 
 - **R1 — DONE** — `TcpReassembler` + `HttpFramer` + stream credential harvester.
 - **R2 — DONE** — `TcpProxy` mode; HTTP toolkit runs on complete framed messages.
-- **R3** — optional transparent in-place re-segmentation with byte-range seq-fix.
+- **R3 — DONE** — position-aware FlowRewriter (per-edit-position seq/ack shifts, retransmit-correct); bounded single-segment edits.
 
 R1 is the foundation and is fully unit-testable with crafted/segmented pcaps;
 start there.

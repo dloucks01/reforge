@@ -38,7 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     br.add_argument("--no-prep", action="store_true",
                     help="skip interface prep (offloads/promisc/host-stack)")
     br.add_argument("--seq-fixup", action="store_true",
-                    help="keep TCP flows in sync after length-changing edits")
+                    help="keep TCP flows in sync after length-changing edits (cumulative)")
+    br.add_argument("--flow-rewrite", action="store_true",
+                    help="position-aware seq/ack fix-ups (R3; retransmit-correct)")
     br.add_argument("--fix-checksums", action="store_true",
                     help="recompute IP/TCP/UDP checksums on every forwarded packet")
 
@@ -108,7 +110,8 @@ def _run_bridge(args) -> int:
 
     engine = RuleEngine(rules)
     bridge = UserspaceBridge(args.a, args.b, engine, fail_open=not args.fail_closed,
-                             seq_fixup=args.seq_fixup, checksum_fixup=args.fix_checksums)
+                             seq_fixup=args.seq_fixup, flow_rewrite=args.flow_rewrite,
+                             checksum_fixup=args.fix_checksums)
 
     def enact_fail_policy() -> None:
         if args.fail_closed:
