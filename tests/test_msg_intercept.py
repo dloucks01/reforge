@@ -96,3 +96,28 @@ def test_relay_holds_and_edits_end_to_end():
     finally:
         for s in (client_relay, client_app, up_relay, up_app):
             s.close()
+
+
+def test_interceptor_resolves_live_queue_via_provider():
+    # a provider lets the proxy hold into whatever queue is currently live,
+    # even after it is swapped (e.g. a bridge replaces it mid-session).
+    current = {"q": InterceptQueue()}
+    mi = MessageInterceptor(lambda: current["q"], keyword="login")
+    assert mi.queue is current["q"]
+
+    q1 = current["q"]
+    t = _hold_then(q1, "forward")
+    out = mi.process(REQ, True, ("c", 1))
+    t.join()
+    assert out == REQ
+
+    current["q"] = InterceptQueue()                 # swap the live queue
+    t2 = _hold_then(current["q"], "forward")
+    mi.process(REQ, True, ("c", 2))
+    t2.join()
+    assert q1.count() == 0                           # not held into the old queue
+
+
+def test_interceptor_none_queue_passes_through():
+    mi = MessageInterceptor(lambda: None, keyword="login")
+    assert mi.process(REQ, True, ("c", 1)) == REQ

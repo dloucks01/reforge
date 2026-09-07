@@ -405,10 +405,12 @@ class AttacksPanel(QWidget):
             return None
         from reforge.attacks.msg_intercept import MessageInterceptor
 
-        queue = self.get_intercept_queue()
-        if queue is None:
+        if self.get_intercept_queue() is None:
             return None
-        return MessageInterceptor(queue, keyword=self.tp_int_keyword.text().strip(),
+        # pass the provider (not a fixed queue) so holds always land in the queue
+        # the operator is currently watching, even if a bridge replaces it.
+        return MessageInterceptor(self.get_intercept_queue,
+                                  keyword=self.tp_int_keyword.text().strip(),
                                   direction=self.tp_int_dir.currentText())
 
     def _build_http_transforms(self) -> list:

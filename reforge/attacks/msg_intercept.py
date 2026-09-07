@@ -30,14 +30,22 @@ def _summary(raw: bytes) -> str:
 
 
 class MessageInterceptor:
-    def __init__(self, queue: InterceptQueue, *, keyword: str = "",
+    def __init__(self, queue, *, keyword: str = "",
                  direction: str = "both", hold_timeout: float = 30.0,
                  transforms: list | None = None):
-        self.queue = queue
+        # `queue` may be an InterceptQueue or a zero-arg provider returning the
+        # currently-live queue. Resolving per message means a proxy always holds
+        # into the queue the operator is actually watching, even if the bridge
+        # replaced it mid-session.
+        self._queue = queue
         self.keyword = keyword.lower().encode("latin-1", "ignore") if keyword else b""
         self.direction = direction if direction in ("both", "requests", "responses") else "both"
         self.hold_timeout = hold_timeout
         self.transforms = transforms or []
+
+    @property
+    def queue(self) -> InterceptQueue | None:
+        return self._queue() if callable(self._queue) else self._queue
 
     def should_hold(self, raw: bytes, from_client: bool) -> bool:
         if self.direction == "requests" and not from_client:
@@ -51,7 +59,8 @@ class MessageInterceptor:
 
         Non-held messages get the normal auto-transforms; held messages block for
         the operator (bounded by the queue cap and hold_timeout)."""
-        if not self.should_hold(raw_msg, from_client):
+        q = self.queue                          # resolve the live queue once
+        if q is None or not self.should_hold(raw_msg, from_client):
             return apply_transforms(raw_msg, from_client, self.transforms)
 
         result: dict = {}
@@ -62,13 +71,13 @@ class MessageInterceptor:
             done.set()
 
         label = "client→server" if from_client else "server→client"
-        hp = self.queue.hold(label, raw_msg, on_release, flow_key=flow_key,
-                             kind="message", meta={"summary": _summary(raw_msg),
-                                                   "from_client": from_client})
+        hp = q.hold(label, raw_msg, on_release, flow_key=flow_key,
+                    kind="message", meta={"summary": _summary(raw_msg),
+                                          "from_client": from_client})
         if hp is None:                          # queue at capacity: don't block
             return apply_transforms(raw_msg, from_client, self.transforms)
 
         if not done.wait(self.hold_timeout):    # operator too slow -> auto-forward
-            self.queue.resolve(hp.id, "forward")
+            q.resolve(hp.id, "forward")
             done.wait(0.5)
         return result.get("out", raw_msg)
