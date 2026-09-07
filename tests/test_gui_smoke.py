@@ -289,3 +289,29 @@ def test_intercept_empty_filter_holds_everything(app):
     seen.clear()
     p.enable_check.setChecked(False)
     assert seen == {"match": None, "text": ""}      # disabling clears
+
+
+def test_intercept_transform_indicator_and_clear(app):
+    from reforge.gui.main_window import MainWindow
+    from reforge.rules.engine import RuleEngine
+    from reforge.rules.filter import parse_filter
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+    from scapy.packet import Raw
+
+    w = MainWindow()
+    w.engine = RuleEngine([])
+    w._intercept_filter = (parse_filter("TCP.dport == 80"), "TCP.dport == 80")
+    assert w.intercept_panel.xform_row.isHidden()            # nothing yet
+
+    o = bytes(Ether() / IP() / TCP(dport=80) / Raw(b"a=admin"))
+    e = bytes(Ether() / IP() / TCP(dport=80) / Raw(b"a=guest"))
+    w._on_intercept_promote(o, e)
+    assert not w.intercept_panel.xform_row.isHidden()        # indicator shows
+    assert "1 active transform" in w.intercept_panel.xform_label.text()
+    assert len([r for r in w.engine.rules if r.name.startswith("__xform__")]) == 1
+
+    w._clear_transforms()
+    assert w.intercept_panel.xform_row.isHidden()            # gone
+    assert w._transforms == []
+    assert not [r for r in w.engine.rules if r.name.startswith("__xform__")]

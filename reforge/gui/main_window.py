@@ -358,6 +358,7 @@ class MainWindow(QMainWindow):
         self.intercept_panel.on_promote = self._on_intercept_promote
         self.intercept_panel.on_queue_config = self._on_queue_config
         self.intercept_panel.on_help = lambda: self._open_guide("_filter")
+        self.intercept_panel.on_clear_transforms = self._clear_transforms
         intercept_dock.setWidget(wrap_with_intro(self.intercept_panel, "intercept", g))
         self.addDockWidget(Qt.RightDockWidgetArea, intercept_dock)
         self.tabifyDockWidget(rules_dock, intercept_dock)
@@ -418,6 +419,7 @@ class MainWindow(QMainWindow):
         self.intercept = InterceptQueue(max_held=max_held, auto_release_s=auto_rel,
                                         overflow=overflow)
         self.intercept_panel.set_queue(self.intercept)
+        self.intercept_panel.set_transform_count(len(self._transforms))
         armed = self.act_arm.isChecked()
         bridge = UserspaceBridge(a, b, engine, intercept=self.intercept, armed=armed,
                                  flow_rewrite=self.act_seqfix.isChecked(),
@@ -507,8 +509,17 @@ class MainWindow(QMainWindow):
         self._transforms.append(Rule(name, match, actions))
         if self.engine is not None:
             self._install_intercept_filter(self.engine)
+        self.intercept_panel.set_transform_count(len(self._transforms))
         desc = describe_actions(actions)
         return f"Transform added ({desc}) — applies to all matching traffic and resends."
+
+    def _clear_transforms(self) -> None:
+        """Remove every promoted 'apply to all' transform from the live engine."""
+        self._transforms = []
+        if self.engine is not None:
+            self._install_intercept_filter(self.engine)
+        self.intercept_panel.set_transform_count(0)
+        self.statusBar().showMessage("Cleared all interactive transforms.")
 
     def _shared_intercept_queue(self):
         """Return the intercept queue (creating one if no bridge is running).

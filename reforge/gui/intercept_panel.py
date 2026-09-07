@@ -66,6 +66,7 @@ class InterceptPanel(QWidget):
         self.on_promote = None
         self.on_queue_config = None    # called with (max_held, auto_release_s, overflow)
         self.on_help = None            # open the filter-syntax guide
+        self.on_clear_transforms = None  # remove all promoted 'apply to all' rules
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
@@ -124,6 +125,17 @@ class InterceptPanel(QWidget):
         self.filter_status = QLabel("Intercept off — all traffic passes through.")
         self.filter_status.setStyleSheet("color: palette(mid);")
         root.addWidget(self.filter_status)
+
+        # active 'Apply to all' transforms (persistent rewrites) — visible + clearable
+        self.xform_row = QWidget()
+        xl = QHBoxLayout(self.xform_row); xl.setContentsMargins(0, 0, 0, 0)
+        self.xform_label = QLabel()
+        self.xform_label.setStyleSheet("color: #8e44ad; font-weight: 600;")
+        self.btn_clear_xform = QPushButton("Clear transforms")
+        self.btn_clear_xform.clicked.connect(lambda: self.on_clear_transforms and self.on_clear_transforms())
+        xl.addWidget(self.xform_label, 1); xl.addWidget(self.btn_clear_xform)
+        self.xform_row.setVisible(False)
+        root.addWidget(self.xform_row)
 
         self.header = QLabel("Interception queue — held: 0")
         self.header.setStyleSheet("font-weight: 700;")
@@ -204,6 +216,12 @@ class InterceptPanel(QWidget):
         self._set_buttons_enabled(False)
 
     # ---- intercept filter / search -----------------------------------------
+    def set_transform_count(self, n: int) -> None:
+        """Show how many persistent 'apply to all' transforms are active."""
+        self.xform_row.setVisible(n > 0)
+        plural = "s" if n != 1 else ""
+        self.xform_label.setText(f"{n} active transform{plural} rewriting matching traffic")
+
     def _apply_preset(self, index: int) -> None:
         if index <= 0:
             return
