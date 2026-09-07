@@ -26,7 +26,7 @@ This is a strong **inline manipulation core**. The gaps below are mostly
 
 ### Tier 1 — highest offensive value, builds directly on the engine
 
-1. **Active MITM positioning modules** (we have inline; add on-path):
+1. **Active MITM positioning modules** — DELIVERED (ARP/DNS/LLMNR/mDNS/NBT-NS/DHCP/NDP):
    - ARP spoofing / cache poisoning; IPv6 **NDP** spoofing + RA flooding.
    - **DNS spoofing** as a first-class module (pattern→answer, wildcard, pinning).
    - **DHCP** starvation + rogue offers (gateway/DNS injection).

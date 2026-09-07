@@ -37,6 +37,8 @@ class AttacksPanel(QWidget):
         self._tls = None
         self._ca = None
         self._tcp = None
+        self._dhcp = None
+        self._ndp = None
 
         root = QVBoxLayout(self)
         note = QLabel("Active on-path attacks — authorized engagements only. Needs root.")
@@ -45,6 +47,8 @@ class AttacksPanel(QWidget):
         root.addWidget(self._arp_box())
         root.addWidget(self._dns_box())
         root.addWidget(self._name_box())
+        root.addWidget(self._dhcp_box())
+        root.addWidget(self._ndp_box())
         root.addWidget(self._tls_box())
         root.addWidget(self._tcpproxy_box())
         root.addStretch(1)
@@ -171,6 +175,95 @@ class AttacksPanel(QWidget):
                 pass
             self._name = None
             self.name_status.setText("stopped")
+
+    # ---- DHCP ---------------------------------------------------------------
+    def _dhcp_box(self) -> QGroupBox:
+        box = QGroupBox("DHCP — starvation / rogue server")
+        v = QVBoxLayout(box)
+        row = QHBoxLayout()
+        self.dhcp_if = QComboBox(); self.dhcp_if.addItems(_ifaces())
+        self.dhcp_mode = QComboBox(); self.dhcp_mode.addItems(["starvation", "rogue"])
+        self.dhcp_server = QLineEdit(); self.dhcp_server.setPlaceholderText("rogue: server/gw/DNS IP")
+        b_start = QPushButton("Start"); b_start.clicked.connect(self._dhcp_start)
+        b_stop = QPushButton("Stop"); b_stop.clicked.connect(self._dhcp_stop)
+        for w in (QLabel("Iface:"), self.dhcp_if, QLabel("Mode:"), self.dhcp_mode,
+                  self.dhcp_server, b_start, b_stop):
+            row.addWidget(w)
+        v.addLayout(row)
+        self.dhcp_status = QLabel("idle"); v.addWidget(self.dhcp_status)
+        return box
+
+    def _dhcp_start(self):
+        from reforge.attacks import dhcp
+
+        self._dhcp_stop()
+        iface = self.dhcp_if.currentText()
+        try:
+            if self.dhcp_mode.currentText() == "starvation":
+                self._dhcp = dhcp.DhcpStarvation(iface)
+            else:
+                srv = self.dhcp_server.text().strip()
+                if not srv:
+                    self.dhcp_status.setText("rogue mode needs a server/gateway IP"); return
+                self._dhcp = dhcp.RogueDhcp(iface, srv, gateway=srv, dns=srv)
+            self._dhcp.start()
+            self.dhcp_status.setText(f"{self.dhcp_mode.currentText()} running on {iface}…")
+        except Exception as exc:
+            self.dhcp_status.setText(f"error: {exc}")
+
+    def _dhcp_stop(self):
+        if self._dhcp:
+            try:
+                self._dhcp.stop()
+            except Exception:
+                pass
+            self._dhcp = None
+            self.dhcp_status.setText("stopped")
+
+    # ---- NDP (IPv6) ---------------------------------------------------------
+    def _ndp_box(self) -> QGroupBox:
+        box = QGroupBox("NDP / IPv6 — NA spoof / rogue RA")
+        v = QVBoxLayout(box)
+        row = QHBoxLayout()
+        self.ndp_if = QComboBox(); self.ndp_if.addItems(_ifaces())
+        self.ndp_mode = QComboBox(); self.ndp_mode.addItems(["na-spoof", "rogue-ra"])
+        self.ndp_target = QLineEdit(); self.ndp_target.setPlaceholderText("target IPv6 (na)")
+        self.ndp_victim = QLineEdit(); self.ndp_victim.setPlaceholderText("victim IPv6 (na)")
+        self.ndp_mac = QLineEdit(); self.ndp_mac.setPlaceholderText("our MAC")
+        b_start = QPushButton("Start"); b_start.clicked.connect(self._ndp_start)
+        b_stop = QPushButton("Stop"); b_stop.clicked.connect(self._ndp_stop)
+        for w in (QLabel("Iface:"), self.ndp_if, self.ndp_mode, self.ndp_target,
+                  self.ndp_victim, self.ndp_mac, b_start, b_stop):
+            row.addWidget(w)
+        v.addLayout(row)
+        self.ndp_status = QLabel("idle"); v.addWidget(self.ndp_status)
+        return box
+
+    def _ndp_start(self):
+        from reforge.attacks import ndp
+
+        self._ndp_stop()
+        iface = self.ndp_if.currentText()
+        mac = self.ndp_mac.text().strip()
+        try:
+            if self.ndp_mode.currentText() == "na-spoof":
+                self._ndp = ndp.NdpSpoofer(iface, self.ndp_target.text().strip(),
+                                           self.ndp_victim.text().strip(), mac)
+            else:
+                self._ndp = ndp.RogueRouter(iface, mac)
+            self._ndp.start()
+            self.ndp_status.setText(f"{self.ndp_mode.currentText()} running on {iface}…")
+        except Exception as exc:
+            self.ndp_status.setText(f"error: {exc}")
+
+    def _ndp_stop(self):
+        if self._ndp:
+            try:
+                self._ndp.stop()
+            except Exception:
+                pass
+            self._ndp = None
+            self.ndp_status.setText("stopped")
 
     # ---- TLS interception ---------------------------------------------------
     def _tls_box(self) -> QGroupBox:
@@ -300,4 +393,5 @@ class AttacksPanel(QWidget):
 
     def stop_all(self):
         self._arp_stop(); self._dns_stop(); self._name_stop()
+        self._dhcp_stop(); self._ndp_stop()
         self._tls_stop(); self._tcp_stop()
