@@ -77,7 +77,7 @@ sudo lab/netns_lab.sh down
 | `reforge/diagnostics/` | Doctor self-tests / health checks |
 | `reforge/gui/` | PySide6 interface |
 | `lab/` | netns + tcpreplay test harness |
-| `packaging/` | AppImage + .deb skeletons |
+| `packaging/` | Self-contained no-install tarball bundle (PyInstaller) |
 
 ## Post-roadmap additions
 
