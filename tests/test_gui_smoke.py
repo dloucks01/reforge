@@ -342,3 +342,15 @@ def test_gui_surfaces_capture_error(app, monkeypatch):
     w._drain()                                    # sees stopped+error -> surfaces it
     assert "No such device" in warned.get("msg", "")
     assert w.service is None                       # and cleaned up
+
+
+def test_gui_demo_capture_starts(app):
+    from reforge.core.capture_service import CaptureService
+    from reforge.gui.main_window import MainWindow
+
+    w = MainWindow()
+    w.start_demo()
+    assert isinstance(w.service, CaptureService)
+    assert w.service.running
+    w.stop_capture()
+    assert w.service is None

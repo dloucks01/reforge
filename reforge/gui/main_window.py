@@ -209,6 +209,12 @@ class MainWindow(QMainWindow):
         act_open.triggered.connect(self.open_pcap)
         tb.addAction(act_open)
 
+        act_demo = QAction("Demo", self)
+        act_demo.setToolTip("Replay synthetic traffic (logins, creds, HTTP, DNS, ARP) "
+                            "to explore the tool — no NIC or root needed")
+        act_demo.triggered.connect(self.start_demo)
+        tb.addAction(act_demo)
+
         act_export = QAction("Export pcap", self)
         act_export.triggered.connect(self.export_pcap)
         tb.addAction(act_export)
@@ -435,6 +441,13 @@ class MainWindow(QMainWindow):
         if not path:
             return
         self._start_service(CaptureService(PcapFileBackend(path)), f"pcap {path}")
+
+    def start_demo(self) -> None:
+        """Replay synthetic lab traffic as a live capture (offline test env)."""
+        from reforge.testlab.synthetic import SyntheticBackend
+
+        self._start_service(CaptureService(SyntheticBackend(loop=True)),
+                            "demo — synthetic lab traffic (looping)")
 
     def _start_service(self, service, label: str, reset: bool = True) -> None:
         """Start any capture-like service (CaptureService or UserspaceBridge).
