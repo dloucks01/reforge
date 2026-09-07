@@ -119,7 +119,7 @@ def qss(pal: dict | None = None) -> str:
     return f"""
 * {{
     font-family: "Inter", "Segoe UI", "Noto Sans", sans-serif;
-    font-size: 13px;
+    font-size: 12.5px;
     color: {p['TEXT']};
 }}
 QMainWindow, QWidget {{ background: {p['BG']}; }}
@@ -136,7 +136,7 @@ QToolButton {{
     background: {p['BG_ELEV']};
     border: 1px solid {p['BORDER']};
     border-radius: 6px;
-    padding: 6px 14px;
+    padding: 4px 11px;
     color: {p['TEXT']};
     font-weight: 600;
 }}
@@ -148,7 +148,7 @@ QLineEdit, QComboBox {{
     background: {p['BG_ELEV']};
     border: 1px solid {p['BORDER']};
     border-radius: 6px;
-    padding: 5px 9px;
+    padding: 4px 8px;
     selection-background-color: {p['ACCENT']};
     selection-color: {p['HL_TEXT']};
 }}
@@ -165,11 +165,11 @@ QTableWidget, QTreeWidget, QPlainTextEdit {{
     background: {p['BG_PANEL']};
     alternate-background-color: {p['BG_ELEV']};
     border: 1px solid {p['BORDER']};
-    border-radius: 8px;
+    border-radius: 6px;
     gridline-color: {p['BORDER']};
     outline: none;
 }}
-QTableWidget::item, QTreeWidget::item {{ padding: 4px 6px; border: none; }}
+QTableWidget::item, QTreeWidget::item {{ padding: 2px 6px; border: none; }}
 QTableWidget::item:selected, QTreeWidget::item:selected {{
     background: {p['ACCENT_DIM']};
     color: {p['TEXT']};
@@ -180,7 +180,7 @@ QHeaderView::section {{
     border: none;
     border-right: 1px solid {p['BORDER']};
     border-bottom: 1px solid {p['BORDER']};
-    padding: 7px 8px;
+    padding: 4px 8px;
     font-weight: 600;
 }}
 QTableCornerButton::section {{ background: {p['BG_ELEV']}; border: none; }}
@@ -231,6 +231,37 @@ QToolTip {{
     background: {p['BG_ELEV2']}; color: {p['TEXT']};
     border: 1px solid {p['BORDER_LIGHT']}; padding: 5px 8px; border-radius: 4px;
 }}
+
+/* --- compact shell components --- */
+QTabBar::tab {{
+    background: {p['BG_PANEL']}; color: {p['TEXT_MUTED']};
+    border: 1px solid {p['BORDER']}; border-bottom: none;
+    padding: 4px 13px; margin-right: 2px;
+    border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: 600;
+}}
+QTabBar::tab:selected {{ background: {p['BG_ELEV']}; color: {p['TEXT']}; }}
+QTabBar::tab:hover {{ color: {p['TEXT']}; }}
+QTabWidget::pane {{ border: 1px solid {p['BORDER']}; border-radius: 6px; top: -1px; }}
+
+#navRail {{ background: {p['BG_PANEL']}; border-right: 1px solid {p['BORDER']}; min-width: 130px; max-width: 130px; }}
+#navBtn {{
+    text-align: left; padding: 7px 11px; border-radius: 7px; border: 1px solid transparent;
+    background: transparent; color: {p['TEXT_MUTED']}; font-weight: 600; font-size: 12.5px;
+}}
+#navBtn:hover {{ background: {p['BG_ELEV']}; color: {p['TEXT']}; }}
+#navBtn:checked {{ background: {p['ACCENT_DIM']}; color: {p['TEXT']}; border-color: {p['BORDER_LIGHT']}; }}
+#navNote {{ color: {p['TEXT_DIM']}; font-size: 10px; padding: 6px 8px; }}
+
+#sessionBar {{ background: {p['BG_PANEL']}; border-bottom: 1px solid {p['BORDER']}; }}
+#sessionBar QLabel {{ color: {p['TEXT_DIM']}; font-size: 10.5px; padding: 0 1px; }}
+#sessionBar QToolButton {{ padding: 4px 10px; }}
+#goBtn {{ background: {p['ACCENT']}; border-color: {p['ACCENT']}; color: #ffffff; }}
+#goBtn:hover {{ background: {p['ACCENT_HOVER']}; }}
+
+#wsHeader {{ background: {p['BG_PANEL']}; border-bottom: 1px solid {p['BORDER']}; }}
+#wsBlurb {{ color: {p['TEXT_MUTED']}; font-size: 11px; }}
+#wsHelp {{ padding: 1px 7px; color: {p['ACCENT']}; font-weight: 700; border: 1px solid {p['BORDER']}; border-radius: 5px; }}
+#wsHelp:hover {{ border-color: {p['ACCENT']}; }}
 """
 
 

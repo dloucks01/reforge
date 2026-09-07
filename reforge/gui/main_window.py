@@ -17,22 +17,25 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
-    QDockWidget,
     QFileDialog,
+    QFrame,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
-    QSizePolicy,
     QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
-    QToolBar,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -53,9 +56,9 @@ from reforge.gui.creds_panel import CredsPanel
 from reforge.gui.diagnostics_panel import DiagnosticsPanel
 from reforge.gui.errors import explain
 from reforge.gui.fuzzing_panel import FuzzingPanel
-from reforge.gui.guidance import wrap_with_intro
 from reforge.gui.guide_panel import GuidePanel
 from reforge.gui.intercept_panel import InterceptPanel
+from reforge.gui.navrail import NavRail
 from reforge.gui.recon_panel import ReconPanel
 from reforge.gui.rules_panel import RulesPanel
 from reforge.gui.scan_panel import ScanPanel
@@ -64,6 +67,16 @@ from reforge.gui.scenario_panel import ScenarioPanel
 log = logging.getLogger("reforge.gui")
 
 COLUMNS = ["No.", "Time", "Source", "Destination", "Proto", "Length", "Info"]
+
+
+_WS_BLURB = {
+    "live": "Capture the stream, catch matching packets, and edit them before they forward.",
+    "recon": "Discover hosts and harvest credentials from what crosses the wire.",
+    "craft": "Build any packet field-by-field, then send, receive, or fuzz it.",
+    "attack": "Position on-path and manipulate application traffic.",
+    "automate": "Script repeatable runs and merge many sensors into one view.",
+    "system": "Health checks, the artifact vault, and the built-in guide.",
+}
 
 
 class MainWindow(QMainWindow):
@@ -83,9 +96,9 @@ class MainWindow(QMainWindow):
         self._mono_small = QFont("JetBrains Mono", 11)
         self._mono_small.setStyleHint(QFont.Monospace)
 
-        self._build_toolbar()
-        self._build_center()
-        self._build_docks()
+        self._build_actions()
+        self._build_panels()
+        self._build_shell()
 
         self.timer = QTimer(self)
         self.timer.setInterval(100)
@@ -131,128 +144,72 @@ class MainWindow(QMainWindow):
             log.debug("settings save failed", exc_info=True)
 
     # ---- layout -------------------------------------------------------------
-    def _build_toolbar(self) -> None:
-        tb = QToolBar("main")
-        tb.setMovable(False)
-        self.addToolBar(tb)
+    def _build_actions(self) -> None:
+        from reforge.gui.guidance import bpf_help_tooltip
 
-        self.brand = QLabel(f"  {APP_NAME}  ")
-        tb.addWidget(self.brand)
-        self.sep = QLabel("│")
-        tb.addWidget(self.sep)
-        self._restyle_brand()
-
-        tb.addWidget(QLabel(" Mode: "))
+        # session-control widgets (kept as attributes for handlers/settings/tests)
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["Passive", "Bridge"])
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
-        tb.addWidget(self.mode_combo)
-
-        tb.addWidget(QLabel("  Interface: "))
         self.iface_combo = QComboBox()
         self.iface_combo.addItems(list_interfaces() or ["<none>"])
-        tb.addWidget(self.iface_combo)
-
-        self.peer_label = QLabel("  Peer: ")
-        tb.addWidget(self.peer_label)
+        self.peer_label = QLabel("Peer")
         self.peer_combo = QComboBox()
         self.peer_combo.addItems(list_interfaces() or ["<none>"])
-        tb.addWidget(self.peer_combo)
         self.peer_label.setVisible(False)
         self.peer_combo.setVisible(False)
-
-        tb.addWidget(QLabel("  BPF: "))
         self.bpf_edit = QLineEdit()
-        self.bpf_edit.setPlaceholderText("e.g. tcp port 80 (optional)")
-        self.bpf_edit.setMaximumWidth(240)
-        from reforge.gui.guidance import bpf_help_tooltip
+        self.bpf_edit.setPlaceholderText("tcp port 80 (optional)")
+        self.bpf_edit.setMaximumWidth(220)
         self.bpf_edit.setToolTip(bpf_help_tooltip())
-        tb.addWidget(self.bpf_edit)
 
-        self.act_start = QAction("Start", self)
-        self.act_start.setShortcut("F5")
-        self.act_start.setToolTip("Start capture or bridge (F5)")
-        self.act_start.triggered.connect(self.on_start)
-        tb.addAction(self.act_start)
+        # brand + theme label used by _restyle_brand / _update_theme_action
+        self.brand = QLabel(APP_NAME)
+        self.sep = QLabel("")
+        self._restyle_brand()
 
-        self.act_stop = QAction("Stop", self)
-        self.act_stop.setShortcut("Shift+F5")
-        self.act_stop.setToolTip("Stop the running service (Shift+F5)")
-        self.act_stop.triggered.connect(self.stop_capture)
+        def act(text, handler, *, shortcut=None, checkable=False, tip=None):
+            a = QAction(text, self)
+            if shortcut:
+                a.setShortcut(shortcut)
+            if tip:
+                a.setToolTip(tip)
+            if checkable:
+                a.setCheckable(True)
+                a.toggled.connect(handler)
+            else:
+                a.triggered.connect(handler)
+            return a
+
+        self.act_start = act("Start", self.on_start, shortcut="F5",
+                             tip="Start capture or bridge (F5)")
+        self.act_stop = act("Stop", self.stop_capture, shortcut="Shift+F5",
+                            tip="Stop the running service (Shift+F5)")
         self.act_stop.setEnabled(False)
-        tb.addAction(self.act_stop)
-
-        tb.addSeparator()
-        self.act_arm = QAction("Arm", self)
-        self.act_arm.setCheckable(True)
-        self.act_arm.toggled.connect(self._on_arm_toggled)
-        tb.addAction(self.act_arm)
-
-        self.act_kill = QAction("Kill-switch", self)
-        self.act_kill.triggered.connect(self.kill_switch)
-        tb.addAction(self.act_kill)
-
-        self.act_seqfix = QAction("TCP seq-fix", self)
-        self.act_seqfix.setCheckable(True)
-        self.act_seqfix.setToolTip("Keep TCP flows in sync after length-changing edits")
-        self.act_seqfix.toggled.connect(self._on_seqfix_toggled)
-        tb.addAction(self.act_seqfix)
-
-        self.act_csum = QAction("Fix cksums", self)
-        self.act_csum.setCheckable(True)
-        self.act_csum.setToolTip("Recompute IP/TCP/UDP checksums on every forwarded packet")
-        self.act_csum.toggled.connect(self._on_csum_toggled)
-        tb.addAction(self.act_csum)
-
-        tb.addSeparator()
-        act_open = QAction("Open pcap", self)
-        act_open.triggered.connect(self.open_pcap)
-        tb.addAction(act_open)
-
-        act_demo = QAction("Demo", self)
-        act_demo.setToolTip("Replay synthetic traffic (logins, creds, HTTP, DNS, ARP) "
-                            "to explore the tool — no NIC or root needed")
-        act_demo.triggered.connect(self.start_demo)
-        tb.addAction(act_demo)
-
-        act_export = QAction("Export pcap", self)
-        act_export.triggered.connect(self.export_pcap)
-        tb.addAction(act_export)
-
-        act_clear = QAction("Clear", self)
-        act_clear.triggered.connect(self.clear)
-        tb.addAction(act_clear)
-
-        tb.addSeparator()
-        act_guide = QAction("Guide", self)
-        act_guide.setShortcut("F1")
-        act_guide.setToolTip("What each section does and how to start (F1)")
-        act_guide.triggered.connect(lambda: self._open_guide(""))
-        tb.addAction(act_guide)
-
-        act_doctor = QAction("Doctor", self)
-        act_doctor.triggered.connect(self.show_doctor)
-        tb.addAction(act_doctor)
-
-        act_plugins = QAction("Plugins", self)
-        act_plugins.triggered.connect(self.load_plugins)
-        tb.addAction(act_plugins)
-
-        act_vault = QAction("Vault", self)
-        act_vault.setToolTip("Encrypt/decrypt an engagement artifact at rest")
-        act_vault.triggered.connect(self.vault_tool)
-        tb.addAction(act_vault)
-
-        # push the theme toggle to the far right
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        tb.addWidget(spacer)
-        self.act_theme = QAction("", self)
-        self.act_theme.triggered.connect(self.toggle_theme)
-        tb.addAction(self.act_theme)
+        self.act_arm = act("Arm", self._on_arm_toggled, checkable=True)
+        self.act_kill = act("Kill", self.kill_switch,
+                            tip="Revert to pass-through and release held packets")
+        self.act_seqfix = act("Seq-fix", self._on_seqfix_toggled, checkable=True,
+                              tip="Keep TCP flows in sync after length-changing edits")
+        self.act_csum = act("Cksum", self._on_csum_toggled, checkable=True,
+                            tip="Recompute checksums on every forwarded packet")
+        self.act_open = act("Open pcap\u2026", self.open_pcap)
+        self.act_demo = act("Demo traffic", self.start_demo,
+                            tip="Replay synthetic traffic \u2014 no NIC or root needed")
+        self.act_export = act("Export pcap\u2026", self.export_pcap)
+        self.act_clear = act("Clear", self.clear)
+        self.act_guide = act("Guide", lambda: self._open_guide(""), shortcut="F1",
+                             tip="What each section does and how to start (F1)")
+        self.act_doctor = act("Doctor", self.show_doctor)
+        self.act_plugins = act("Plugins\u2026", self.load_plugins)
+        self.act_vault = act("Vault\u2026", self.vault_tool,
+                             tip="Encrypt/decrypt an engagement artifact at rest")
+        self.act_theme = act("", self.toggle_theme)
         self._update_theme_action()
-
-    def _build_center(self) -> None:
+        for a in (self.act_start, self.act_stop, self.act_guide):
+            self.addAction(a)  # window-level shortcuts
+    def _build_panels(self) -> None:
+        # capture inspection widgets (the packet stream + detail/hex view)
         self.table = QTableWidget(0, len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -261,12 +218,11 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(24)
+        self.table.verticalHeader().setDefaultSectionSize(22)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         hdr = self.table.horizontalHeader()
-        hdr.setStretchLastSection(True)   # Info column stretches
-        # Column widths: No | Time | Source | Destination | Proto | Length | Info
-        for col, width in ((0, 64), (1, 110), (2, 160), (3, 160), (4, 90), (5, 78)):
+        hdr.setStretchLastSection(True)
+        for col, width in ((0, 56), (1, 96), (2, 150), (3, 150), (4, 80), (5, 66)):
             self.table.setColumnWidth(col, width)
         hdr.setSectionResizeMode(0, QHeaderView.Fixed)
         hdr.setSectionResizeMode(5, QHeaderView.Fixed)
@@ -275,29 +231,15 @@ class MainWindow(QMainWindow):
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Field", "Value"])
         self.tree.setAlternatingRowColors(True)
-        self.tree.setColumnWidth(0, 230)
-
+        self.tree.setColumnWidth(0, 210)
         mono = QFont("monospace")
         mono.setStyleHint(QFont.Monospace)
         self.hex = QPlainTextEdit()
         self.hex.setReadOnly(True)
         self.hex.setFont(mono)
 
-        detail = QSplitter(Qt.Horizontal)
-        detail.addWidget(self.tree)
-        detail.addWidget(self.hex)
-        detail.setSizes([650, 650])
-
-        center = QSplitter(Qt.Vertical)
-        center.addWidget(self.table)
-        center.addWidget(detail)
-        center.setSizes([500, 350])
-
-        self.tabs = QTabWidget()
-        g = self._open_guide
-        self.tabs.addTab(wrap_with_intro(center, "capture", g), "Capture")
+        # capability panels (single-instance; composed into workspaces)
         self.builder_panel = BuilderPanel(get_selected_packet=self._selected_packet_bytes)
-        self.tabs.addTab(wrap_with_intro(self.builder_panel, "builder", g), "Builder")
         self.diag_panel = DiagnosticsPanel(
             get_selected_packet=self._selected_packet_bytes,
             build_engine=lambda: self.rules_panel.build_engine(dry_run=False),
@@ -305,34 +247,201 @@ class MainWindow(QMainWindow):
             get_bridge_ifaces=self._bridge_ifaces,
             get_rule_specs=lambda: self.rules_panel.specs,
         )
-        self.tabs.addTab(wrap_with_intro(self.diag_panel, "diagnostics", g), "Diagnostics")
         self.fuzz_panel = FuzzingPanel(
             get_builder_bytes=lambda: self.builder_panel._current_bytes(),
             get_selected_packet=self._selected_packet_bytes,
         )
-        self.tabs.addTab(wrap_with_intro(self.fuzz_panel, "fuzzing", g), "Fuzzing")
         self.attacks_panel = AttacksPanel()
         self.attacks_panel.get_intercept_queue = self._shared_intercept_queue
-        self.tabs.addTab(wrap_with_intro(self.attacks_panel, "attacks", g), "Attacks")
+        self.recon_panel = ReconPanel()
         self.scan_panel = ScanPanel(get_inventory=lambda: self.recon_panel.inv)
-        self.tabs.addTab(wrap_with_intro(self.scan_panel, "scan", g), "Scan")
         self.scenario_panel = ScenarioPanel()
-        self.tabs.addTab(wrap_with_intro(self.scenario_panel, "scenario", g), "Scenario")
         self.console_panel = ConsolePanel()
-        self.tabs.addTab(wrap_with_intro(self.console_panel, "console", g), "Console")
         self.guide_panel = GuidePanel()
-        self.tabs.addTab(self.guide_panel, "Guide")
-        self.setCentralWidget(self.tabs)
+        self.creds_panel = CredsPanel()
+        self.rules_panel = RulesPanel(on_dry_run=self._dry_run_over_capture)
+        self.intercept_panel = InterceptPanel()
+        self.intercept_panel.on_filter = self._on_intercept_filter
+        self.intercept_panel.on_promote = self._on_intercept_promote
+        self.intercept_panel.on_queue_config = self._on_queue_config
+        self.intercept_panel.on_help = lambda: self._open_guide("_filter")
+        self.intercept_panel.on_clear_transforms = self._clear_transforms
 
+
+    def _build_shell(self) -> None:
+        self._workspaces = {
+            "live": self._ws_live(),
+            "recon": self._ws("recon", self._ws_recon()),
+            "craft": self._ws("craft", self._ws_craft()),
+            "attack": self._ws("attack", self.attacks_panel),
+            "automate": self._ws("automate", self._ws_automate()),
+            "system": self._ws("system", self._ws_system()),
+        }
+        self.stack = QStackedWidget()
+        self._ws_index = {}
+        for key, w in self._workspaces.items():
+            self._ws_index[key] = self.stack.addWidget(w)
+
+        self.nav = NavRail()
+        self.nav.switched.connect(self._go_workspace)
+
+        body = QWidget()
+        bl = QHBoxLayout(body)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(0)
+        bl.addWidget(self.nav)
+        bl.addWidget(self.stack, 1)
+
+        central = QWidget()
+        cl = QVBoxLayout(central)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
+        cl.addWidget(self._build_session_bar())
+        cl.addWidget(body, 1)
+        self.setCentralWidget(central)
+        self._go_workspace("live")
+
+    def _build_session_bar(self) -> QWidget:
+        bar = QFrame()
+        bar.setObjectName("sessionBar")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(10, 6, 10, 6)
+        row.setSpacing(8)
+
+        def tbtn(action, obj=None):
+            b = QToolButton()
+            b.setDefaultAction(action)
+            b.setToolButtonStyle(Qt.ToolButtonTextOnly)
+            if obj:
+                b.setObjectName(obj)
+            return b
+
+        row.addWidget(self.brand)
+        row.addWidget(self._vsep())
+        for w in (QLabel("Mode"), self.mode_combo, QLabel("If"), self.iface_combo,
+                  self.peer_label, self.peer_combo, QLabel("BPF"), self.bpf_edit):
+            row.addWidget(w)
+        row.addWidget(tbtn(self.act_start, "goBtn"))
+        row.addWidget(tbtn(self.act_stop))
+        row.addWidget(self._vsep())
+        for a in (self.act_arm, self.act_kill, self.act_seqfix, self.act_csum):
+            row.addWidget(tbtn(a))
+        row.addStretch(1)
+
+        overflow = QToolButton()
+        overflow.setText("\u22ef")
+        overflow.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(overflow)
+        for a in (self.act_open, self.act_demo, self.act_export, self.act_clear):
+            menu.addAction(a)
+        menu.addSeparator()
+        for a in (self.act_doctor, self.act_plugins, self.act_vault):
+            menu.addAction(a)
+        overflow.setMenu(menu)
+        row.addWidget(overflow)
+        row.addWidget(tbtn(self.act_guide))
+        row.addWidget(tbtn(self.act_theme))
+        return bar
+
+    def _vsep(self) -> QLabel:
+        s = QLabel("\u2502")
+        s.setStyleSheet(f"color:{theme.BORDER_LIGHT};")
+        return s
+
+    def _ws(self, key, inner) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+        v.addWidget(self._ws_header(key))
+        v.addWidget(inner, 1)
+        return w
+
+    def _ws_header(self, key) -> QWidget:
+        h = QFrame()
+        h.setObjectName("wsHeader")
+        row = QHBoxLayout(h)
+        row.setContentsMargins(12, 5, 12, 5)
+        row.setSpacing(8)
+        lbl = QLabel(_WS_BLURB.get(key, ""))
+        lbl.setObjectName("wsBlurb")
+        row.addWidget(lbl)
+        row.addStretch(1)
+        q = QToolButton()
+        q.setText("?")
+        q.setObjectName("wsHelp")
+        q.setToolTip("Open the Guide")
+        q.clicked.connect(lambda: self._open_guide(""))
+        row.addWidget(q)
+        return h
+
+    def _ws_live(self) -> QWidget:
+        detail = QSplitter(Qt.Horizontal)
+        detail.addWidget(self.tree)
+        detail.addWidget(self.hex)
+        detail.setSizes([420, 520])
+
+        right = QTabWidget()
+        right.addTab(self.intercept_panel, "Intercept")
+        right.addTab(self.rules_panel, "Rules")
+
+        lower = QSplitter(Qt.Horizontal)
+        lower.addWidget(detail)
+        lower.addWidget(right)
+        lower.setSizes([560, 640])
+
+        outer = QSplitter(Qt.Vertical)
+        outer.addWidget(self.table)
+        outer.addWidget(lower)
+        outer.setSizes([300, 520])
+        return self._ws("live", outer)
+
+    def _ws_recon(self) -> QWidget:
+        bottom = QSplitter(Qt.Horizontal)
+        bottom.addWidget(self.recon_panel)
+        bottom.addWidget(self.creds_panel)
+        sp = QSplitter(Qt.Vertical)
+        sp.addWidget(self.scan_panel)
+        sp.addWidget(bottom)
+        sp.setSizes([300, 360])
+        return sp
+
+    def _ws_craft(self) -> QWidget:
+        t = QTabWidget()
+        t.addTab(self.builder_panel, "Builder")
+        t.addTab(self.fuzz_panel, "Fuzzing")
+        return t
+
+    def _ws_automate(self) -> QWidget:
+        sp = QSplitter(Qt.Horizontal)
+        sp.addWidget(self.scenario_panel)
+        sp.addWidget(self.console_panel)
+        return sp
+
+    def _ws_system(self) -> QWidget:
+        t = QTabWidget()
+        t.addTab(self.diag_panel, "Diagnostics")
+        t.addTab(self.guide_panel, "Guide")
+        return t
+
+    def _go_workspace(self, key) -> None:
+        idx = self._ws_index.get(key)
+        if idx is not None:
+            self.stack.setCurrentIndex(idx)
+            self.nav.set_active(key)
     def _open_guide(self, section_key: str = "") -> None:
-        """Switch to the Guide tab and scroll to a section (used by intro links)."""
-        for i in range(self.tabs.count()):
-            if self.tabs.tabText(i) == "Guide":
-                self.tabs.setCurrentIndex(i)
-                break
+        """Switch to the System workspace, its Guide tab, and scroll to a section."""
+        self._go_workspace("system")
+        sysw = self._workspaces.get("system")
+        if sysw is not None:
+            tabs = sysw.findChild(QTabWidget)
+            if tabs is not None:
+                for i in range(tabs.count()):
+                    if tabs.tabText(i) == "Guide":
+                        tabs.setCurrentIndex(i)
+                        break
         if section_key:
             self.guide_panel.scroll_to(section_key)
-
     def _bridge_ifaces(self) -> list[str]:
         if self.mode_combo.currentText() != "Bridge":
             return []
@@ -346,44 +455,6 @@ class MainWindow(QMainWindow):
         i = rows[0].row()
         return self.packets[i][1].data if i < len(self.packets) else None
 
-    def _build_docks(self) -> None:
-        left = QDockWidget("Session", self)
-        session_tree = QTreeWidget()
-        session_tree.setHeaderLabels(["Session"])
-        left.setWidget(session_tree)
-        self.addDockWidget(Qt.LeftDockWidgetArea, left)
-
-        g = self._open_guide
-        rules_dock = QDockWidget("Rules", self)
-        self.rules_panel = RulesPanel(on_dry_run=self._dry_run_over_capture)
-        rules_dock.setWidget(wrap_with_intro(self.rules_panel, "rules", g))
-        self.addDockWidget(Qt.RightDockWidgetArea, rules_dock)
-
-        intercept_dock = QDockWidget("Intercept", self)
-        self.intercept_panel = InterceptPanel()
-        self.intercept_panel.on_filter = self._on_intercept_filter
-        self.intercept_panel.on_promote = self._on_intercept_promote
-        self.intercept_panel.on_queue_config = self._on_queue_config
-        self.intercept_panel.on_help = lambda: self._open_guide("_filter")
-        self.intercept_panel.on_clear_transforms = self._clear_transforms
-        intercept_dock.setWidget(wrap_with_intro(self.intercept_panel, "intercept", g))
-        self.addDockWidget(Qt.RightDockWidgetArea, intercept_dock)
-        self.tabifyDockWidget(rules_dock, intercept_dock)
-
-        creds_dock = QDockWidget("Creds", self)
-        self.creds_panel = CredsPanel()
-        creds_dock.setWidget(wrap_with_intro(self.creds_panel, "creds", g))
-        self.addDockWidget(Qt.RightDockWidgetArea, creds_dock)
-        self.tabifyDockWidget(intercept_dock, creds_dock)
-
-        recon_dock = QDockWidget("Recon", self)
-        self.recon_panel = ReconPanel()
-        recon_dock.setWidget(wrap_with_intro(self.recon_panel, "recon", g))
-        self.addDockWidget(Qt.RightDockWidgetArea, recon_dock)
-        self.tabifyDockWidget(creds_dock, recon_dock)
-        rules_dock.raise_()
-
-    # ---- capture control ----------------------------------------------------
     def _on_mode_changed(self, mode: str) -> None:
         bridge = mode == "Bridge"
         self.peer_label.setVisible(bridge)

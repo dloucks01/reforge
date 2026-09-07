@@ -143,17 +143,17 @@ def test_intercept_editor_rejects_bad_hex(app):
     assert panel._sync_from_editor() is False
 
 
-def test_guide_tab_and_intros_present(app):
-    from reforge.gui.guidance import SECTIONS, PanelIntro
-    from reforge.gui.main_window import MainWindow
+def test_workspaces_and_guide_present(app):
+    from reforge.gui.guidance import SECTIONS
+    from reforge.gui.main_window import _WS_BLURB, MainWindow
+    from reforge.gui.navrail import SECTIONS as RAIL
 
     win = MainWindow()
-    titles = [win.tabs.tabText(i) for i in range(win.tabs.count())]
-    assert "Guide" in titles
-    # each non-Guide tab carries an intro strip
-    for name in ("Capture", "Builder", "Attacks", "Scan"):
-        w = win.tabs.widget(titles.index(name))
-        assert w.findChild(PanelIntro) is not None, f"{name} missing intro"
+    # the six workspaces exist and the rail lists them
+    assert set(win._workspaces) == {k for k, _ in RAIL}
+    # each workspace carries a compact header blurb
+    for key in win._workspaces:
+        assert _WS_BLURB.get(key)
     # the guide indexes every section plus the filter cheat sheet
     labels = [win.guide_panel.index.item(i).text() for i in range(win.guide_panel.index.count())]
     assert len(labels) == len(SECTIONS) + 1 and "Filter syntax" in labels
@@ -164,8 +164,18 @@ def test_open_guide_navigates_and_scrolls(app):
 
     win = MainWindow()
     win._open_guide("intercept")
-    assert win.tabs.tabText(win.tabs.currentIndex()) == "Guide"
+    # lands on the System workspace with the Guide tab selected
+    assert win.stack.currentIndex() == win._ws_index["system"]
     win.guide_panel.scroll_to("_filter")            # must not raise
+
+
+def test_nav_switches_workspaces(app):
+    from reforge.gui.main_window import MainWindow
+
+    win = MainWindow()
+    for key in ("recon", "craft", "attack", "automate", "system", "live"):
+        win._go_workspace(key)
+        assert win.stack.currentIndex() == win._ws_index[key]
 
 
 def test_intercept_presets_fill_filter(app):
