@@ -103,6 +103,8 @@ class TcpReassembler:
     """Reassembles both directions of all observed TCP flows."""
 
     def __init__(self, on_data: Callable[[tuple, bytes], None] | None = None):
+        from reforge.core.scapy_init import warmup
+        warmup()
         self.dirs: dict[tuple, DirectionBuffer] = {}
         self.on_data = on_data
         self.closed: set[tuple] = set()

@@ -48,17 +48,16 @@ def s_sleep(ctx: ScenarioContext, p: dict) -> None:
 @step("analyze_pcap", attack="T1040")
 def s_analyze_pcap(ctx: ScenarioContext, p: dict) -> None:
     from scapy.layers.l2 import Ether
-    from scapy.utils import rdpcap
 
     from reforge.attacks.creds import CredentialExtractor
     from reforge.attacks.stream_harvester import StreamHarvester
+    from reforge.core.pcaputil import read_frames
 
     harvester = StreamHarvester()          # multi-segment TCP
     perpkt = CredentialExtractor()         # single-packet + non-TCP (SNMP)
     seen: set = set()
     n = 0
-    for pkt in rdpcap(p["file"]):
-        raw = bytes(pkt)
+    for raw in read_frames(p["file"]):
         n += 1
         try:
             eth = Ether(raw)
@@ -87,11 +86,10 @@ def s_analyze_pcap(ctx: ScenarioContext, p: dict) -> None:
 
 @step("detect_covert", attack="T1048")
 def s_detect_covert(ctx: ScenarioContext, p: dict) -> None:
-    from scapy.utils import rdpcap
-
+    from reforge.core.pcaputil import read_packets
     from reforge.covert.detect import detect
 
-    findings = detect(list(rdpcap(p["file"])))
+    findings = detect(read_packets(p["file"]))
     for f in findings:
         ctx.notes.append(f"covert: {f.channel} — {f.detail} ({f.confidence})")
     ctx.event("detect_covert", f"{len(findings)} finding(s)")

@@ -12,10 +12,10 @@ def seeds_from_pcap(path: str | Path, bpf_layer: str | None = None,
     If `bpf_layer` is given (e.g. 'TCP', 'UDP', 'DNS'), keep only packets that
     carry that layer — a focused corpus for one protocol.
     """
-    from scapy.utils import rdpcap
+    from reforge.core.pcaputil import read_packets
 
     seeds: list[bytes] = []
-    for pkt in rdpcap(str(path)):
+    for pkt in read_packets(path):
         if bpf_layer and not pkt.haslayer(bpf_layer):
             continue
         seeds.append(bytes(pkt))

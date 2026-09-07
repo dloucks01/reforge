@@ -57,6 +57,9 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     setup_logging(logging.DEBUG if args.verbose else logging.INFO)
 
+    from reforge.core.scapy_init import warmup
+    warmup()
+
     command = args.command or "gui"
 
     if command == "gui":

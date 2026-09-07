@@ -54,6 +54,8 @@ def _ports(pkt) -> tuple[int, int]:
 
 class CredentialExtractor:
     def __init__(self):
+        from reforge.core.scapy_init import warmup
+        warmup()
         # per-flow scratch: (src,sport,dst,dport) -> {"user":..., "auth_stage":...}
         self._flows: dict[tuple, dict] = {}
 

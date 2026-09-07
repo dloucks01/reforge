@@ -38,16 +38,13 @@ class PcapFileBackend(CaptureBackend):
         return True, "reads pcap/pcapng offline"
 
     def open(self) -> None:
-        from scapy.utils import rdpcap
+        from reforge.core.pcaputil import read_frames
 
-        packets = rdpcap(self.path)
+        # Use the exact captured bytes (not a recomputed serialization) so replay
+        # matches the wire and dissection is consistent.
         self._frames = [
-            Frame(
-                data=bytes(pkt),
-                ingress=self.iface_label,
-                meta={"ts": float(getattr(pkt, "time", 0.0))},
-            )
-            for pkt in packets
+            Frame(data=fb, ingress=self.iface_label, meta={})
+            for fb in read_frames(self.path)
         ]
         self._pos = 0
 

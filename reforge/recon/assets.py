@@ -26,6 +26,8 @@ class Host:
 
 class AssetInventory:
     def __init__(self):
+        from reforge.core.scapy_init import warmup
+        warmup()
         self.hosts: dict[str, Host] = {}
 
     def _host(self, ip: str, mac: str = "") -> Host:
