@@ -37,6 +37,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="drop links on failure instead of kernel-bridge fallback")
     br.add_argument("--no-prep", action="store_true",
                     help="skip interface prep (offloads/promisc/host-stack)")
+    br.add_argument("--seq-fixup", action="store_true",
+                    help="keep TCP flows in sync after length-changing edits")
+    br.add_argument("--fix-checksums", action="store_true",
+                    help="recompute IP/TCP/UDP checksums on every forwarded packet")
 
     return p
 
@@ -103,7 +107,8 @@ def _run_bridge(args) -> int:
         prepare_bridge(args.a, args.b, journal, apply=True)
 
     engine = RuleEngine(rules)
-    bridge = UserspaceBridge(args.a, args.b, engine, fail_open=not args.fail_closed)
+    bridge = UserspaceBridge(args.a, args.b, engine, fail_open=not args.fail_closed,
+                             seq_fixup=args.seq_fixup, checksum_fixup=args.fix_checksums)
 
     def enact_fail_policy() -> None:
         if args.fail_closed:

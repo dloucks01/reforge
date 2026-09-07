@@ -38,16 +38,28 @@ def _rev_key(pkt):
 @dataclass
 class TcpSeqFixer:
     deltas: dict = field(default_factory=dict)   # directional key -> cumulative delta
+    _seen: set = field(default_factory=set)      # (fwd_key, orig_seq) already counted
 
-    def note_length_change(self, pkt, delta: int) -> None:
+    def note_length_change(self, pkt, delta: int, orig_seq: int | None = None) -> None:
         """Record that we changed this segment's payload length by `delta`.
 
-        Applies from the NEXT segment onward in the same direction, so we record
-        it against the forward key but do not shift this packet's own seq.
+        Applies from the NEXT segment onward in the same direction. Deduplicated
+        by (flow, original sequence) so a RETRANSMISSION of the same segment
+        isn't counted twice (which would corrupt the stream).
+
+        NOTE: this is the clean-flow model. Robust handling of overlapping /
+        partially-retransmitted / out-of-order segments needs per-flow byte-range
+        tracking and is future work — keep seq-fixup for controlled flows.
         """
         if delta == 0:
             return
+        from scapy.layers.inet import TCP
+
         key = _fwd_key(pkt)
+        seq = orig_seq if orig_seq is not None else pkt[TCP].seq
+        if (key, seq) in self._seen:
+            return                       # retransmit of an already-counted segment
+        self._seen.add((key, seq))
         self.deltas[key] = self.deltas.get(key, 0) + delta
 
     def apply(self, pkt) -> bool:

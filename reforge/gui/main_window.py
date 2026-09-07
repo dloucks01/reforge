@@ -137,6 +137,18 @@ class MainWindow(QMainWindow):
         self.act_kill.triggered.connect(self.kill_switch)
         tb.addAction(self.act_kill)
 
+        self.act_seqfix = QAction("TCP seq-fix", self)
+        self.act_seqfix.setCheckable(True)
+        self.act_seqfix.setToolTip("Keep TCP flows in sync after length-changing edits")
+        self.act_seqfix.toggled.connect(self._on_seqfix_toggled)
+        tb.addAction(self.act_seqfix)
+
+        self.act_csum = QAction("Fix cksums", self)
+        self.act_csum.setCheckable(True)
+        self.act_csum.setToolTip("Recompute IP/TCP/UDP checksums on every forwarded packet")
+        self.act_csum.toggled.connect(self._on_csum_toggled)
+        tb.addAction(self.act_csum)
+
         tb.addSeparator()
         act_open = QAction("Open pcap", self)
         act_open.triggered.connect(self.open_pcap)
@@ -291,7 +303,9 @@ class MainWindow(QMainWindow):
         self.intercept = InterceptQueue()
         self.intercept_panel.set_queue(self.intercept)
         armed = self.act_arm.isChecked()
-        bridge = UserspaceBridge(a, b, engine, intercept=self.intercept, armed=armed)
+        bridge = UserspaceBridge(a, b, engine, intercept=self.intercept, armed=armed,
+                                 seq_fixup=self.act_seqfix.isChecked(),
+                                 checksum_fixup=self.act_csum.isChecked())
         state = "ARMED" if armed else "pass-through (safe)"
         self._start_service(bridge, f"bridge {a} <-> {b}  [{state}]")
 
@@ -374,6 +388,16 @@ class MainWindow(QMainWindow):
             self.service.armed = armed
             self.statusBar().showMessage("ARMED — rules active" if armed
                                          else "Safe — pass-through")
+
+    def _on_seqfix_toggled(self, on: bool) -> None:
+        if self.service is not None and hasattr(self.service, "set_seq_fixup"):
+            self.service.set_seq_fixup(on)
+        self.statusBar().showMessage("TCP seq-fix " + ("ON" if on else "off"))
+
+    def _on_csum_toggled(self, on: bool) -> None:
+        if self.service is not None and hasattr(self.service, "checksum_fixup"):
+            self.service.checksum_fixup = on
+        self.statusBar().showMessage("Checksum fix-up " + ("ON" if on else "off"))
 
     def kill_switch(self) -> None:
         """Instantly revert to pass-through and release all held packets."""

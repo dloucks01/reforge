@@ -84,7 +84,8 @@ class UserspaceBridge:
     def __init__(self, if_a: str, if_b: str, engine: RuleEngine | None = None, *,
                  port_factory=ScapyPort, fail_open: bool = True,
                  tap: bool = True, max_queue: int = 100_000,
-                 intercept=None, armed: bool = True):
+                 intercept=None, armed: bool = True, seq_fixup: bool = False,
+                 checksum_fixup: bool = False):
         self.if_a = if_a
         self.if_b = if_b
         self.engine = engine or RuleEngine([])
@@ -93,7 +94,9 @@ class UserspaceBridge:
         self.tap = tap
         self.intercept = intercept       # optional InterceptQueue
         self.armed = armed               # False = pure pass-through (safe)
+        self.checksum_fixup = checksum_fixup  # recompute checksums on every forward
         self.counters = BridgeCounters()
+        self.set_seq_fixup(seq_fixup)    # optional TCP seq/ack fix-ups
 
         self._queue: "Queue[tuple[float, Frame]]" = Queue(maxsize=max_queue)
         self._thread: threading.Thread | None = None
@@ -106,6 +109,16 @@ class UserspaceBridge:
         # forever. We remember recently-sent bytes briefly and skip their echo.
         self._sent: dict[bytes, float] = {}
         self._suppress_ttl = 0.5
+
+    def set_seq_fixup(self, on: bool) -> None:
+        """Enable/disable stateful TCP seq/ack fix-ups (resets flow state)."""
+        from reforge.core.tcpflow import TcpSeqFixer
+
+        self.seq_fixer = TcpSeqFixer() if on else None
+
+    @property
+    def seq_fixup(self) -> bool:
+        return self.seq_fixer is not None
 
     # ---- per-frame logic ----------------------------------------------------
     def _bump_dir(self, ingress: str, n: int) -> None:
@@ -127,7 +140,9 @@ class UserspaceBridge:
             return
 
         try:
-            res = apply_engine(self.engine, data, ingress=ingress, link="ether")
+            res = apply_engine(self.engine, data, ingress=ingress, link="ether",
+                               seq_fixer=self.seq_fixer,
+                               recompute_checksums=self.checksum_fixup)
         except Exception:
             self.counters.errors += 1
             log.exception("engine error; forwarding original frame")

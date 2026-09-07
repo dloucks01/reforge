@@ -15,6 +15,15 @@ from reforge.rules.base import Disposition
 from reforge.rules.engine import RuleEngine
 
 
+def _tcp_payload_len(scapy_pkt) -> int | None:
+    """Length of the TCP payload, or None if this isn't a TCP packet."""
+    from scapy.layers.inet import TCP
+
+    if not scapy_pkt.haslayer(TCP):
+        return None
+    return len(bytes(scapy_pkt[TCP].payload))
+
+
 @dataclass
 class ApplyResult:
     disposition: Disposition
@@ -27,8 +36,16 @@ class ApplyResult:
 
 
 def apply_engine(engine: RuleEngine, raw: bytes, ingress: str = "",
-                 link: str = "ether") -> ApplyResult:
+                 link: str = "ether", seq_fixer=None,
+                 recompute_checksums: bool = False) -> ApplyResult:
     pkt = Packet.from_bytes(raw, ingress=ingress, link=link)
+
+    # Capture the original TCP payload length before rules run, so we can tell
+    # how much a length-changing edit shifted the stream (for seq/ack fix-ups).
+    orig_tcp_paylen = None
+    if seq_fixer is not None:
+        orig_tcp_paylen = _tcp_payload_len(pkt.scapy())
+
     verdict = engine.evaluate(pkt)
 
     if verdict.disposition is Disposition.DROP:
@@ -38,7 +55,23 @@ def apply_engine(engine: RuleEngine, raw: bytes, ingress: str = "",
         return ApplyResult(Disposition.HOLD, None, matched_rule=verdict.matched_rule,
                            notes=verdict.notes)
 
+    # Stateful TCP seq/ack fix-ups: shift this segment by deltas we already
+    # introduced in the flow, then record any new delta from this edit.
+    if seq_fixer is not None and orig_tcp_paylen is not None:
+        from scapy.layers.inet import TCP
+
+        sc = pkt.scapy()
+        orig_seq = sc[TCP].seq                    # capture BEFORE apply shifts it
+        changed = seq_fixer.apply(sc)
+        delta = _tcp_payload_len(sc) - orig_tcp_paylen
+        if changed or delta:
+            pkt.modified = True
+        if delta:
+            seq_fixer.note_length_change(sc, delta, orig_seq=orig_seq)
+
     modified = pkt.modified
+    if recompute_checksums:
+        pkt.modified = True   # force rebuild to recompute lengths/checksums
     out = pkt.rebuild()
     extra = [e.rebuild() if e.modified else e.raw for e in verdict.extra_sends]
     return ApplyResult(
