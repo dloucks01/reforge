@@ -34,14 +34,27 @@ class Session:
     def path(self) -> Path:
         return SESSION_DIR / f"{self.name}.reforge.json"
 
-    def save(self, path: Path | None = None) -> Path:
+    def save(self, path: Path | None = None, passphrase: str | None = None) -> Path:
         ensure_dirs()
         target = path or self.path()
-        target.write_text(json.dumps(asdict(self), indent=2))
+        blob = json.dumps(asdict(self), indent=2).encode()
+        if passphrase:
+            from reforge.core.vault import encrypt_bytes
+
+            target.write_bytes(encrypt_bytes(blob, passphrase))
+        else:
+            target.write_bytes(blob)
         return target
 
     @classmethod
-    def load(cls, path: Path) -> "Session":
-        data = json.loads(Path(path).read_text())
+    def load(cls, path: Path, passphrase: str | None = None) -> "Session":
+        raw = Path(path).read_bytes()
+        from reforge.core.vault import decrypt_bytes, is_encrypted
+
+        if is_encrypted(raw):
+            if not passphrase:
+                raise ValueError("session is encrypted; a passphrase is required")
+            raw = decrypt_bytes(raw, passphrase)
+        data = json.loads(raw.decode())
         data["interfaces"] = InterfaceConfig(**data.get("interfaces", {}))
         return cls(**data)

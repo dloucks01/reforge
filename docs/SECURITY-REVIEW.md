@@ -58,7 +58,7 @@ features.
 7. **Engagement artifacts are sensitive at rest.** Sessions, scenario reports,
    diagnostic bundles, and pcaps can contain harvested credentials and network
    detail in plaintext. Store them encrypted / on removable media and wipe after
-   the engagement. (At-rest encryption is a planned option, not yet implemented.)
+   the engagement. (At-rest encryption is available: `reforge.core.vault` / `reforge vault` / encrypted `Session.save`.)
 
 ## Notes checked and cleared
 

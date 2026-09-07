@@ -49,6 +49,14 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--dry-run", action="store_true", help="validate + log without attacking")
     sc.add_argument("--json", action="store_true", help="emit the report as JSON")
     sc.add_argument("--out", metavar="FILE", help="write the report to a file")
+    sc.add_argument("--encrypt", metavar="PASSPHRASE",
+                    help="encrypt the --out report at rest (AES-256-GCM)")
+
+    vt = sub.add_parser("vault", help="encrypt/decrypt an engagement artifact at rest")
+    vt.add_argument("mode", choices=["encrypt", "decrypt"])
+    vt.add_argument("src")
+    vt.add_argument("dst")
+    vt.add_argument("--passphrase", required=True)
 
     return p
 
@@ -92,10 +100,24 @@ def main(argv: list[str] | None = None) -> int:
         if args.out:
             from pathlib import Path
 
-            Path(args.out).write_text(text)
-            print(f"report written to {args.out}")
+            if args.encrypt:
+                from reforge.core.vault import encrypt_bytes
+
+                Path(args.out).write_bytes(encrypt_bytes(text.encode(), args.encrypt))
+                print(f"encrypted report written to {args.out}")
+            else:
+                Path(args.out).write_text(text)
+                print(f"report written to {args.out}")
         else:
             print(text)
+        return 0
+
+    if command == "vault":
+        from reforge.core.vault import decrypt_file, encrypt_file
+
+        fn = encrypt_file if args.mode == "encrypt" else decrypt_file
+        out = fn(args.src, args.dst, args.passphrase)
+        print(f"{args.mode}ed -> {out}")
         return 0
 
     return 1
