@@ -89,11 +89,15 @@ class BuilderPanel(QWidget):
         btn_send = QPushButton("Send"); btn_send.clicked.connect(self._send)
         btn_sr = QPushButton("Send && Receive"); btn_sr.clicked.connect(self._send_receive)
         btn_fuzz = QPushButton("Fuzz send"); btn_fuzz.clicked.connect(self._fuzz_send)
+        from reforge.evasion.techniques import TECHNIQUES
+        self.evade_combo = QComboBox(); self.evade_combo.addItems(list(TECHNIQUES))
+        btn_evade = QPushButton("Evade send"); btn_evade.clicked.connect(self._evade_send)
         proto = QPushButton("Load protocol"); proto.clicked.connect(self._load_protocol)
         save = QPushButton("Save template"); save.clicked.connect(self._save)
         load = QPushButton("Load template"); load.clicked.connect(self._load)
         for w in (QLabel("Iface:"), self.iface, QLabel("Count:"), self.count,
-                  QLabel("Interval:"), self.interval, self.l2, btn_send, btn_sr, btn_fuzz):
+                  QLabel("Interval:"), self.interval, self.l2, btn_send, btn_sr, btn_fuzz,
+                  self.evade_combo, btn_evade):
             send.addWidget(w)
         send.addStretch(1)
         send.addWidget(proto); send.addWidget(save); send.addWidget(load)
@@ -238,6 +242,24 @@ class BuilderPanel(QWidget):
             self.status.setText(f"Fuzz-sent {self.count.value()} mutated variant(s) on {iface}.")
         except Exception as exc:
             QMessageBox.critical(self, "Send error", str(exc))
+
+    def _evade_send(self) -> None:
+        data = self._current_bytes()
+        if data is None:
+            return
+        from scapy.layers.l2 import Ether
+
+        from reforge.evasion.techniques import apply_evasion
+
+        technique = self.evade_combo.currentText()
+        iface = self.iface.currentText()
+        try:
+            frames = apply_evasion(Ether(data), technique)
+            for f in frames:
+                sender.inject(iface, f, 1, 0.0, self.l2.isChecked())
+            self.status.setText(f"Sent {len(frames)} frame(s) via '{technique}' on {iface}.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Evasion error", str(exc))
 
     def _load_protocol(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Load protocol (JSON)", "", "JSON (*.json)")

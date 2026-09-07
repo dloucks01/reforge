@@ -46,7 +46,7 @@ This is a strong **inline manipulation core**. The gaps below are mostly
 
 5. **TLS interception** — DELIVERED (attacks/tls_ca.py, tls_sni.py, tls_proxy.py, starttls.py): dynamic CA, SNI parsing,
    STARTTLS downgrade, per-host bypass — unlocks HTTPS manipulation end-to-end.
-6. **IDS/IPS evasion toolkit** (for testing defenses): IP/TCP fragmentation and
+6. **IDS/IPS evasion toolkit** — DELIVERED (reforge/evasion/): IP/TCP fragmentation and
    overlap, TTL/segmentation tricks, packet-in-packet, timing/obfuscation.
 7. **Passive intelligence / recon** — DELIVERED (reforge/recon/): p0f-style OS + service/version fingerprint,
    asset discovery & network mapping from observed traffic, flow analytics,
