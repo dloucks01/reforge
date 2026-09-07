@@ -32,7 +32,9 @@ from reforge.rules import spec as S
 
 RULE_COLUMNS = ["On", "Name", "Match", "Actions", "Hits"]
 OPS = ["eq", "ne", "lt", "le", "gt", "ge", "in", "contains", "cidr"]
-ACTION_TYPES = ["drop", "set_field", "delay", "payload_replace", "duplicate", "hold"]
+ACTION_TYPES = ["drop", "set_field", "delay", "payload_replace", "duplicate", "hold",
+                "fuzz", "http_sslstrip", "http_strip_encoding", "http_inject",
+                "http_replace_body", "http_strip_cookie", "http_remove_sec_headers"]
 
 
 def _coerce(value: str):
@@ -107,6 +109,15 @@ class AddRuleDialog(QDialog):
         elif t == "payload_replace":
             action = {"type": "payload_replace", "find": self.a_find.text(),
                       "replace": self.a_replace.text()}
+        elif t == "fuzz":
+            action = {"type": "fuzz", "mutations": int(self.a_value.text() or 4)}
+        elif t == "http_inject":
+            action = {"type": "http_inject", "snippet": self.a_value.text()}
+        elif t == "http_replace_body":
+            action = {"type": "http_replace_body", "body": self.a_value.text(),
+                      "content_type": self.a_find.text() or None}
+        elif t.startswith("http_"):
+            action = {"type": t}
         else:  # drop / hold
             action = {"type": t}
 

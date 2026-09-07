@@ -59,6 +59,21 @@ def build_action(spec: dict):
         return Fuzz(spec.get("mutations", 1), spec.get("seed"))
     if t == "plugin":
         return A.Plugin(spec["name"])
+    if t.startswith("http_"):
+        from reforge.attacks import http_actions as H
+
+        if t == "http_sslstrip":
+            return H.SslStrip()
+        if t == "http_strip_encoding":
+            return H.StripAcceptEncoding()
+        if t == "http_inject":
+            return H.InjectHtml(spec.get("snippet", ""), spec.get("marker", "</body>"))
+        if t == "http_replace_body":
+            return H.ReplaceBody(spec.get("body", ""), spec.get("content_type"))
+        if t == "http_strip_cookie":
+            return H.StripSecureCookie()
+        if t == "http_remove_sec_headers":
+            return H.RemoveSecurityHeaders()
     raise ValueError(f"unknown action type: {t}")
 
 
@@ -105,4 +120,10 @@ def action_summary(spec: dict) -> str:
         return f"fuzz x{spec.get('mutations', 1)}"
     if t == "plugin":
         return f"plugin {spec.get('name')}"
+    if t == "http_inject":
+        return f"http:inject {str(spec.get('snippet',''))[:24]}"
+    if t == "http_replace_body":
+        return "http:replace-body"
+    if t.startswith("http_"):
+        return t.replace("http_", "http:").replace("_", "-")
     return t

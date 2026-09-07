@@ -35,7 +35,7 @@ This is a strong **inline manipulation core**. The gaps below are mostly
 2. **Credential & secret harvesting** (passive, from cleartext + metadata):
    - FTP/HTTP-Basic/SMTP/POP3/IMAP/SNMP/LDAP/Telnet creds, cookies, tokens,
      NTLM/Kerberos hashes, API keys. Live "creds" feed + export.
-3. **HTTP attack toolkit** (first-class, not just rewrite rules):
+3. **HTTP attack toolkit** — DELIVERED (attacks/http.py + http_actions.py):
    - **sslstrip / HSTS bypass**, HTTPS→HTTP downgrade, content & JS injection,
      response tampering, cookie/session manipulation, BeEF-style hook injection,
      **on-the-fly file replacement** (swap a download for a payload).
