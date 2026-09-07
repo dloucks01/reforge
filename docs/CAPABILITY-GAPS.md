@@ -62,8 +62,8 @@ This is a strong **inline manipulation core**. The gaps below are mostly
     capture + injection (separate adapter/domain).
 11. **Real high-rate data plane:** the AF_XDP/PF_RING/DPDK fast-path (today we
     detect capability; the zero-copy loop is a compiled component).
-12. **Distributed / multi-sensor:** multiple inline points + central console.
-13. **Covert channels / C2 testing:** build & detect tunneled/exfil channels.
+12. **Distributed / multi-sensor** — DELIVERED (reforge/distributed/): multiple sensors report to a central collector.
+13. **Covert channels / C2 testing** — DELIVERED (reforge/covert/): build & detect tunneled/exfil channels.
 
 ---
 
