@@ -8,6 +8,7 @@ and save/load templates.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import Qt
@@ -268,7 +269,7 @@ class BuilderPanel(QWidget):
         from reforge.craft.custom_proto import define_protocol
 
         try:
-            spec = json.loads(open(path).read())
+            spec = json.loads(Path(path).read_text())
             define_protocol(spec)
         except Exception as exc:
             QMessageBox.critical(self, "Protocol error", str(exc))
@@ -301,7 +302,7 @@ class BuilderPanel(QWidget):
     def _load(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Load template", "", "JSON (*.json)")
         if path:
-            self.load_spec(json.loads(open(path).read()))
+            self.load_spec(json.loads(Path(path).read_text()))
             self.status.setText(f"Loaded template <- {path}")
 
 

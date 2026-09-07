@@ -98,7 +98,11 @@ class NetworkSink:
                  server_hostname: str = "collector"):
         sock = socket.create_connection((host, port), timeout=5)
         if ssl_context is not None:
-            sock = ssl_context.wrap_socket(sock, server_hostname=server_hostname)
+            try:
+                sock = ssl_context.wrap_socket(sock, server_hostname=server_hostname)
+            except Exception:
+                sock.close()          # don't leak the TCP socket on a failed handshake
+                raise
         self.sock = sock
 
     def __call__(self, msg) -> None:
