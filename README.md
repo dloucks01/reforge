@@ -78,3 +78,13 @@ sudo lab/netns_lab.sh down
 | `reforge/gui/` | PySide6 interface |
 | `lab/` | netns + tcpreplay test harness |
 | `packaging/` | AppImage + .deb skeletons |
+
+## Post-roadmap additions
+
+- **Smart fuzzing** (`reforge/fuzzing/`): structure-aware / field-aware / dictionary
+  / byte strategies, a seed corpus (incl. from pcap), a response monitor (reset /
+  error / latency / crash), and a reproducible campaign runner with response-
+  feedback guidance. GUI **Fuzzing** tab. See `docs/CAPABILITY-GAPS.md` for the
+  offensive roadmap (active MITM modules, credential harvesting, HTTP attack
+  toolkit, TLS interception, evasion, recon).
+- **TCP seq/ack fix-up + checksum fix-up** wired into the live bridge.

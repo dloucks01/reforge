@@ -41,6 +41,7 @@ from reforge.core.packet import Packet
 from reforge.gui import theme
 from reforge.gui.builder_panel import BuilderPanel
 from reforge.gui.diagnostics_panel import DiagnosticsPanel
+from reforge.gui.fuzzing_panel import FuzzingPanel
 from reforge.gui.intercept_panel import InterceptPanel
 from reforge.gui.rules_panel import RulesPanel
 
@@ -233,6 +234,11 @@ class MainWindow(QMainWindow):
             get_rule_specs=lambda: self.rules_panel.specs,
         )
         self.tabs.addTab(self.diag_panel, "Diagnostics")
+        self.fuzz_panel = FuzzingPanel(
+            get_builder_bytes=lambda: self.builder_panel._current_bytes(),
+            get_selected_packet=self._selected_packet_bytes,
+        )
+        self.tabs.addTab(self.fuzz_panel, "Fuzzing")
         self.setCentralWidget(self.tabs)
 
     def _bridge_ifaces(self) -> list[str]:
