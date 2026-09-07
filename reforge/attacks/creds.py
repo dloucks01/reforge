@@ -81,8 +81,14 @@ class CredentialExtractor:
         text = payload.decode("latin-1", errors="replace")
 
         out += self._http(text, src, dst)
-        out += self._line_protocols(text, pkt, src, dst, dport)
+        out += self._line_protocols(text, self._flow(pkt), src, dst, dport)
         return out
+
+    def extract_text(self, text: str, src: str, dst: str, dport: int,
+                     flow_key: tuple) -> list["Credential"]:
+        """Extract from reassembled application bytes (not a single packet)."""
+        flow = self._flows.setdefault(flow_key, {})
+        return self._http(text, src, dst) + self._line_protocols(text, flow, src, dst, dport)
 
     # ---- HTTP ---------------------------------------------------------------
     def _http(self, text: str, src: str, dst: str) -> list[Credential]:
@@ -123,9 +129,8 @@ class CredentialExtractor:
         return out
 
     # ---- line-oriented (FTP/SMTP/POP3/IMAP) ---------------------------------
-    def _line_protocols(self, text: str, pkt, src: str, dst: str, dport: int) -> list[Credential]:
+    def _line_protocols(self, text: str, flow: dict, src: str, dst: str, dport: int) -> list[Credential]:
         out: list[Credential] = []
-        flow = self._flow(pkt)
         proto = {21: "FTP", 25: "SMTP", 587: "SMTP", 110: "POP3", 143: "IMAP"}.get(dport)
 
         for raw_line in text.splitlines():

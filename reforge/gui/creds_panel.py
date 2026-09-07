@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from reforge.attacks.creds import CredentialExtractor
+from reforge.attacks.stream_harvester import StreamHarvester
 from reforge.gui import theme
 
 COLS = ["Kind", "Proto", "From", "To", "Username", "Secret"]
@@ -23,7 +24,8 @@ COLS = ["Kind", "Proto", "From", "To", "Username", "Secret"]
 class CredsPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.extractor = CredentialExtractor()
+        self.extractor = CredentialExtractor()   # per-packet (incl. non-TCP: SNMP)
+        self.stream = StreamHarvester()          # multi-segment TCP reassembly
         self._seen: set = set()
 
         root = QVBoxLayout(self)
@@ -45,17 +47,24 @@ class CredsPanel(QWidget):
     def add_from_frame(self, data: bytes) -> None:
         from scapy.layers.l2 import Ether
 
+        creds = []
         try:
-            creds = self.extractor.extract(Ether(data))
+            creds += self.extractor.extract(Ether(data))   # non-TCP + single-segment
         except Exception:
-            return
+            pass
+        try:
+            creds += self.stream.add_frame(data)            # multi-segment TCP
+        except Exception:
+            pass
+        added = False
         for c in creds:
             key = (c.kind, c.username, c.secret, c.src, c.dst)
             if key in self._seen:
                 continue
             self._seen.add(key)
             self._add_row(c)
-        if creds:
+            added = True
+        if added:
             self.count.setText(f"Credentials harvested: {len(self._seen)}")
 
     def _add_row(self, c) -> None:
@@ -72,4 +81,5 @@ class CredsPanel(QWidget):
         self.table.setRowCount(0)
         self._seen.clear()
         self.extractor = CredentialExtractor()
+        self.stream = StreamHarvester()
         self.count.setText("Credentials harvested: 0")

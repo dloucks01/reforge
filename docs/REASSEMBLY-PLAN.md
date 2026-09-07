@@ -73,7 +73,7 @@ flow eviction · chunked + Content-Length + gzip framing · connection reuse
 
 ## Phasing
 
-- **R1** — `TcpReassembler` + `HttpFramer` + passive harvester/HTTP integration.
+- **R1 — DONE** — `TcpReassembler` + `HttpFramer` + stream credential harvester.
 - **R2** — `TcpProxy` mode; route the HTTP toolkit through it for large bodies.
 - **R3** — optional transparent in-place re-segmentation with byte-range seq-fix.
 
