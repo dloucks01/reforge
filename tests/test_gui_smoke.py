@@ -141,3 +141,41 @@ def test_intercept_editor_rejects_bad_hex(app):
     panel, _ = _panel_with(app, bytes(Ether()))
     panel.hex_edit.setPlainText("zz not hex")
     assert panel._sync_from_editor() is False
+
+
+def test_guide_tab_and_intros_present(app):
+    from reforge.gui.guidance import SECTIONS, PanelIntro
+    from reforge.gui.main_window import MainWindow
+
+    win = MainWindow()
+    titles = [win.tabs.tabText(i) for i in range(win.tabs.count())]
+    assert "Guide" in titles
+    # each non-Guide tab carries an intro strip
+    for name in ("Capture", "Builder", "Attacks", "Scan"):
+        w = win.tabs.widget(titles.index(name))
+        assert w.findChild(PanelIntro) is not None, f"{name} missing intro"
+    # the guide indexes every section plus the filter cheat sheet
+    labels = [win.guide_panel.index.item(i).text() for i in range(win.guide_panel.index.count())]
+    assert len(labels) == len(SECTIONS) + 1 and "Filter syntax" in labels
+
+
+def test_open_guide_navigates_and_scrolls(app):
+    from reforge.gui.main_window import MainWindow
+
+    win = MainWindow()
+    win._open_guide("intercept")
+    assert win.tabs.tabText(win.tabs.currentIndex()) == "Guide"
+    win.guide_panel.scroll_to("_filter")            # must not raise
+
+
+def test_intercept_presets_fill_filter(app):
+    from reforge.gui.main_window import MainWindow
+
+    win = MainWindow()
+    ip = win.intercept_panel
+    captured = {}
+    ip.on_filter = lambda m, t: captured.update(match=m, text=t)
+    ip._apply_preset(1)                             # first real preset
+    assert ip.enable_check.isChecked()
+    assert ip.filter_edit.text() and captured.get("match") is not None
+    assert ip.preset_combo.currentIndex() == 0      # resets like a menu

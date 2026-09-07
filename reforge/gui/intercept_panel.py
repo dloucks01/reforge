@@ -32,7 +32,19 @@ from PySide6.QtWidgets import (
 
 from reforge.core.packet import Packet
 from reforge.dissect import scapy_tree
+from reforge.gui.guidance import filter_help_tooltip
 from reforge.rules.filter import FilterError, parse_filter
+
+# common catch recipes: (label, filter expression, sensible hold limit)
+_PRESETS = [
+    ("HTTP logins", 'TCP.dport == 80 and Raw.load contains "login"', 20),
+    ("All HTTP", "TCP.dport == 80", 50),
+    ("HTTPS (TLS)", "TCP.dport == 443", 50),
+    ("DNS queries", "UDP and DNS", 50),
+    ("POST bodies", 'Raw.load contains "POST "', 20),
+    ("A /24 subnet", "IP.src cidr 10.0.0.0/24", 30),
+    ("Everything", "", 10),
+]
 
 HELD_COLUMNS = ["ID", "Ingress", "Proto", "Info", "Age"]
 _LAYER_FIELD = Qt.UserRole + 1
@@ -53,23 +65,36 @@ class InterceptPanel(QWidget):
         self.on_filter = None
         self.on_promote = None
         self.on_queue_config = None    # called with (max_held, auto_release_s, overflow)
+        self.on_help = None            # open the filter-syntax guide
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
 
         # --- intercept filter bar: which packets to catch -------------------
         fbar = QHBoxLayout()
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItem("Presets…")
+        for label, _flt, _lim in _PRESETS:
+            self.preset_combo.addItem(label)
+        self.preset_combo.setToolTip("Fill the filter with a common recipe")
+        self.preset_combo.activated.connect(self._apply_preset)
         self.enable_check = QCheckBox("Intercept")
         self.enable_check.setToolTip("Hold matching packets for edit; others pass through")
         self.enable_check.toggled.connect(self._apply_filter)
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText(
             'catch filter, e.g.  TCP.dport == 80 and Raw.load contains "login"')
+        self.filter_edit.setToolTip(filter_help_tooltip())
         self.filter_edit.returnPressed.connect(self._apply_filter)
         btn_apply = QPushButton("Apply"); btn_apply.clicked.connect(self._apply_filter)
+        btn_help = QPushButton("?"); btn_help.setMaximumWidth(28)
+        btn_help.setToolTip("Filter syntax help")
+        btn_help.clicked.connect(lambda: self.on_help() if self.on_help else None)
+        fbar.addWidget(self.preset_combo)
         fbar.addWidget(self.enable_check)
         fbar.addWidget(self.filter_edit, 1)
         fbar.addWidget(btn_apply)
+        fbar.addWidget(btn_help)
         root.addLayout(fbar)
 
         # --- volume safeguards: never drown the queue or stall the wire -----
@@ -179,6 +204,18 @@ class InterceptPanel(QWidget):
         self._set_buttons_enabled(False)
 
     # ---- intercept filter / search -----------------------------------------
+    def _apply_preset(self, index: int) -> None:
+        if index <= 0:
+            return
+        _label, flt, limit = _PRESETS[index - 1]
+        self.filter_edit.setText(flt)
+        self.limit_spin.setValue(limit)
+        self.enable_check.blockSignals(True)
+        self.enable_check.setChecked(True)
+        self.enable_check.blockSignals(False)
+        self._apply_filter()                    # install the preset filter
+        self.preset_combo.setCurrentIndex(0)    # behave like a menu
+
     def _apply_filter(self) -> None:
         """Compile the filter box and (via on_filter) install/clear a HOLD rule."""
         enabled = self.enable_check.isChecked()

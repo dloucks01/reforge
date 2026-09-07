@@ -52,6 +52,8 @@ from reforge.gui.console_panel import ConsolePanel
 from reforge.gui.creds_panel import CredsPanel
 from reforge.gui.diagnostics_panel import DiagnosticsPanel
 from reforge.gui.fuzzing_panel import FuzzingPanel
+from reforge.gui.guidance import wrap_with_intro
+from reforge.gui.guide_panel import GuidePanel
 from reforge.gui.intercept_panel import InterceptPanel
 from reforge.gui.recon_panel import ReconPanel
 from reforge.gui.rules_panel import RulesPanel
@@ -172,6 +174,11 @@ class MainWindow(QMainWindow):
         tb.addAction(act_clear)
 
         tb.addSeparator()
+        act_guide = QAction("Guide", self)
+        act_guide.setToolTip("What each section does and how to start")
+        act_guide.triggered.connect(lambda: self._open_guide(""))
+        tb.addAction(act_guide)
+
         act_doctor = QAction("Doctor", self)
         act_doctor.triggered.connect(self.show_doctor)
         tb.addAction(act_doctor)
@@ -236,9 +243,10 @@ class MainWindow(QMainWindow):
         center.setSizes([500, 350])
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(center, "Capture")
+        g = self._open_guide
+        self.tabs.addTab(wrap_with_intro(center, "capture", g), "Capture")
         self.builder_panel = BuilderPanel(get_selected_packet=self._selected_packet_bytes)
-        self.tabs.addTab(self.builder_panel, "Builder")
+        self.tabs.addTab(wrap_with_intro(self.builder_panel, "builder", g), "Builder")
         self.diag_panel = DiagnosticsPanel(
             get_selected_packet=self._selected_packet_bytes,
             build_engine=lambda: self.rules_panel.build_engine(dry_run=False),
@@ -246,22 +254,33 @@ class MainWindow(QMainWindow):
             get_bridge_ifaces=self._bridge_ifaces,
             get_rule_specs=lambda: self.rules_panel.specs,
         )
-        self.tabs.addTab(self.diag_panel, "Diagnostics")
+        self.tabs.addTab(wrap_with_intro(self.diag_panel, "diagnostics", g), "Diagnostics")
         self.fuzz_panel = FuzzingPanel(
             get_builder_bytes=lambda: self.builder_panel._current_bytes(),
             get_selected_packet=self._selected_packet_bytes,
         )
-        self.tabs.addTab(self.fuzz_panel, "Fuzzing")
+        self.tabs.addTab(wrap_with_intro(self.fuzz_panel, "fuzzing", g), "Fuzzing")
         self.attacks_panel = AttacksPanel()
         self.attacks_panel.get_intercept_queue = self._shared_intercept_queue
-        self.tabs.addTab(self.attacks_panel, "Attacks")
+        self.tabs.addTab(wrap_with_intro(self.attacks_panel, "attacks", g), "Attacks")
         self.scan_panel = ScanPanel(get_inventory=lambda: self.recon_panel.inv)
-        self.tabs.addTab(self.scan_panel, "Scan")
+        self.tabs.addTab(wrap_with_intro(self.scan_panel, "scan", g), "Scan")
         self.scenario_panel = ScenarioPanel()
-        self.tabs.addTab(self.scenario_panel, "Scenario")
+        self.tabs.addTab(wrap_with_intro(self.scenario_panel, "scenario", g), "Scenario")
         self.console_panel = ConsolePanel()
-        self.tabs.addTab(self.console_panel, "Console")
+        self.tabs.addTab(wrap_with_intro(self.console_panel, "console", g), "Console")
+        self.guide_panel = GuidePanel()
+        self.tabs.addTab(self.guide_panel, "Guide")
         self.setCentralWidget(self.tabs)
+
+    def _open_guide(self, section_key: str = "") -> None:
+        """Switch to the Guide tab and scroll to a section (used by intro links)."""
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == "Guide":
+                self.tabs.setCurrentIndex(i)
+                break
+        if section_key:
+            self.guide_panel.scroll_to(section_key)
 
     def _bridge_ifaces(self) -> list[str]:
         if self.mode_combo.currentText() != "Bridge":
@@ -283,9 +302,10 @@ class MainWindow(QMainWindow):
         left.setWidget(session_tree)
         self.addDockWidget(Qt.LeftDockWidgetArea, left)
 
+        g = self._open_guide
         rules_dock = QDockWidget("Rules", self)
         self.rules_panel = RulesPanel(on_dry_run=self._dry_run_over_capture)
-        rules_dock.setWidget(self.rules_panel)
+        rules_dock.setWidget(wrap_with_intro(self.rules_panel, "rules", g))
         self.addDockWidget(Qt.RightDockWidgetArea, rules_dock)
 
         intercept_dock = QDockWidget("Intercept", self)
@@ -293,19 +313,20 @@ class MainWindow(QMainWindow):
         self.intercept_panel.on_filter = self._on_intercept_filter
         self.intercept_panel.on_promote = self._on_intercept_promote
         self.intercept_panel.on_queue_config = self._on_queue_config
-        intercept_dock.setWidget(self.intercept_panel)
+        self.intercept_panel.on_help = lambda: self._open_guide("_filter")
+        intercept_dock.setWidget(wrap_with_intro(self.intercept_panel, "intercept", g))
         self.addDockWidget(Qt.RightDockWidgetArea, intercept_dock)
         self.tabifyDockWidget(rules_dock, intercept_dock)
 
         creds_dock = QDockWidget("Creds", self)
         self.creds_panel = CredsPanel()
-        creds_dock.setWidget(self.creds_panel)
+        creds_dock.setWidget(wrap_with_intro(self.creds_panel, "creds", g))
         self.addDockWidget(Qt.RightDockWidgetArea, creds_dock)
         self.tabifyDockWidget(intercept_dock, creds_dock)
 
         recon_dock = QDockWidget("Recon", self)
         self.recon_panel = ReconPanel()
-        recon_dock.setWidget(self.recon_panel)
+        recon_dock.setWidget(wrap_with_intro(self.recon_panel, "recon", g))
         self.addDockWidget(Qt.RightDockWidgetArea, recon_dock)
         self.tabifyDockWidget(creds_dock, recon_dock)
         rules_dock.raise_()
