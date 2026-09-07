@@ -45,6 +45,7 @@ class InterceptPanel(QWidget):
         self._current_id: int | None = None
         self._work: bytes = b""
         self._current_kind = "packet"
+        self._view = "hex"                 # raw editor view: "hex" | "ascii"
         self._applying = False
         # Set by the main window: on_filter(match_or_None, text) installs/clears a
         # HOLD rule; on_promote(original, edited) turns an edit into a persistent
@@ -134,26 +135,37 @@ class InterceptPanel(QWidget):
         self.tree.itemChanged.connect(self._on_field_edited)
         elayout.addWidget(self.tree)
 
+        # raw editor with a Hex / ASCII view toggle
+        vrow = QHBoxLayout()
+        vrow.addWidget(QLabel("Raw:"))
+        self.view_combo = QComboBox(); self.view_combo.addItems(["Hex", "ASCII"])
+        self.view_combo.setToolTip("Edit the raw bytes as hex or as ASCII/latin-1 text")
+        self.view_combo.currentTextChanged.connect(self._on_view_changed)
+        vrow.addWidget(self.view_combo)
+        vrow.addStretch(1)
+        elayout.addLayout(vrow)
+
         mono = QFont("JetBrains Mono"); mono.setStyleHint(QFont.Monospace)
         self.hex_edit = QPlainTextEdit()
         self.hex_edit.setFont(mono)
-        self.hex_edit.setPlaceholderText("raw bytes as hex (editable) — then Apply hex")
+        self.hex_edit.setPlaceholderText("raw bytes (editable) — switch Hex/ASCII, then Apply")
         elayout.addWidget(self.hex_edit)
 
         buttons = QHBoxLayout()
-        self.btn_apply_hex = QPushButton("Apply hex")
+        self.btn_apply = QPushButton("Apply")
+        self.btn_apply.setToolTip("Apply the raw edit to the working bytes")
         self.btn_all = QPushButton("Apply to all")
         self.btn_all.setToolTip("Turn this edit into a persistent transform applied to "
                                 "every matching packet, including resends")
         self.btn_fwd = QPushButton("Forward")
         self.btn_mod = QPushButton("Forward modified")
         self.btn_drop = QPushButton("Drop")
-        self.btn_apply_hex.clicked.connect(self._apply_hex)
+        self.btn_apply.clicked.connect(self._apply_edit)
         self.btn_all.clicked.connect(self._apply_to_all)
         self.btn_fwd.clicked.connect(lambda: self._resolve("forward"))
         self.btn_mod.clicked.connect(lambda: self._resolve("modify"))
         self.btn_drop.clicked.connect(lambda: self._resolve("drop"))
-        buttons.addWidget(self.btn_apply_hex)
+        buttons.addWidget(self.btn_apply)
         buttons.addStretch(1)
         buttons.addWidget(self.btn_all)
         buttons.addWidget(self.btn_fwd)
@@ -274,8 +286,12 @@ class InterceptPanel(QWidget):
             return
         self._current_id = pid
         self._current_kind = hp.kind
-        # message items edit as text (HTTP), packets keep the tree + hex view
-        self.btn_apply_hex.setText("Apply text" if hp.kind == "message" else "Apply hex")
+        # default the raw view to ASCII for HTTP messages, Hex for packets;
+        # packets also keep the field tree
+        self._view = "ascii" if hp.kind == "message" else "hex"
+        self.view_combo.blockSignals(True)
+        self.view_combo.setCurrentText("ASCII" if self._view == "ascii" else "Hex")
+        self.view_combo.blockSignals(False)
         self.tree.setVisible(hp.kind != "message")
         self._set_work_bytes(hp.data)
         self._set_buttons_enabled(True)
@@ -285,10 +301,53 @@ class InterceptPanel(QWidget):
         self._applying = True
         if self._current_kind == "message":
             self.tree.clear()
-            self.hex_edit.setPlainText(self._work.decode("latin-1"))  # editable HTTP text
         else:
             self._rebuild_tree()
+        self._render_editor()
+        self._applying = False
+
+    # ---- raw hex/ascii editor ----------------------------------------------
+    def _render_editor(self) -> None:
+        """Show the working bytes in the current view (hex or ascii text)."""
+        if self._view == "hex":
             self.hex_edit.setPlainText(" ".join(f"{b:02x}" for b in self._work))
+        else:
+            self.hex_edit.setPlainText(self._work.decode("latin-1"))
+
+    def _sync_from_editor(self) -> bool:
+        """Parse the editor content (per view) into the working bytes.
+
+        Returns False on a malformed hex edit (working bytes left unchanged)."""
+        if self._view == "hex":
+            toks = self.hex_edit.toPlainText().replace(":", " ").split()
+            try:
+                self._work = bytes(int(t, 16) for t in toks)
+            except ValueError:
+                return False
+            return True
+        text = self.hex_edit.toPlainText()
+        if self._current_kind == "message":
+            # HTTP framing needs CRLF; Qt collapses it to LF in the widget
+            text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+        self._work = text.encode("latin-1", "ignore")
+        return True
+
+    def _on_view_changed(self, label: str) -> None:
+        if self._applying:
+            return
+        self._sync_from_editor()                # keep edits made in the old view
+        self._view = "ascii" if label == "ASCII" else "hex"
+        self._applying = True
+        self._render_editor()
+        self._applying = False
+
+    def _apply_edit(self) -> None:
+        if not self._sync_from_editor():
+            return
+        self._applying = True
+        if self._current_kind != "message":
+            self._rebuild_tree()
+        self._render_editor()                   # normalize formatting
         self._applying = False
 
     def _rebuild_tree(self) -> None:
@@ -326,30 +385,11 @@ class InterceptPanel(QWidget):
         except Exception:
             self._rebuild_tree()  # revert display on bad input
 
-    def _message_bytes(self) -> bytes:
-        """Encode the edited message text, restoring CRLF line endings.
-
-        Qt's plain-text widget collapses CRLF to LF; HTTP framing needs CRLF, so
-        canonicalize any mix back to CRLF before the bytes go on the wire."""
-        text = self.hex_edit.toPlainText().replace("\r\n", "\n").replace("\r", "\n")
-        return text.replace("\n", "\r\n").encode("latin-1", "ignore")
-
-    def _apply_hex(self) -> None:
-        if self._current_kind == "message":
-            self._work = self._message_bytes()
-            return
-        raw = self.hex_edit.toPlainText().replace(":", " ").split()
-        try:
-            data = bytes(int(b, 16) for b in raw)
-            self._set_work_bytes(data)
-        except Exception:
-            pass
-
     def _resolve(self, action: str) -> None:
         if self.queue is None or self._current_id is None:
             return
-        if action == "modify" and self._current_kind == "message":
-            self._work = self._message_bytes()
+        if action == "modify":
+            self._sync_from_editor()            # capture the latest hex/ascii edit
         self.queue.resolve(self._current_id, action, self._work if action == "modify" else None)
         self._current_id = None
         self.tree.setVisible(True)
@@ -359,7 +399,7 @@ class InterceptPanel(QWidget):
         self.refresh_pending()
 
     def _set_buttons_enabled(self, on: bool) -> None:
-        for b in (self.btn_apply_hex, self.btn_all, self.btn_fwd, self.btn_mod, self.btn_drop):
+        for b in (self.btn_apply, self.btn_all, self.btn_fwd, self.btn_mod, self.btn_drop):
             b.setEnabled(on)
 
     # ---- volume safeguards / promote ---------------------------------------
@@ -379,6 +419,7 @@ class InterceptPanel(QWidget):
         hp = self.queue.get(self._current_id)
         if hp is None:
             return
+        self._sync_from_editor()                        # capture the latest edit
         msg = self.on_promote(hp.data, self._work)      # derive + install transform
         # forwarding the current edited packet is also part of "apply to all"
         self._resolve("modify")
