@@ -253,6 +253,7 @@ class MainWindow(QMainWindow):
         )
         self.tabs.addTab(self.fuzz_panel, "Fuzzing")
         self.attacks_panel = AttacksPanel()
+        self.attacks_panel.get_intercept_queue = self._shared_intercept_queue
         self.tabs.addTab(self.attacks_panel, "Attacks")
         self.scan_panel = ScanPanel(get_inventory=lambda: self.recon_panel.inv)
         self.tabs.addTab(self.scan_panel, "Scan")
@@ -435,6 +436,18 @@ class MainWindow(QMainWindow):
             self._install_intercept_filter(self.engine)
         desc = describe_actions(actions)
         return f"Transform added ({desc}) — applies to all matching traffic and resends."
+
+    def _shared_intercept_queue(self):
+        """Return the intercept queue (creating one if no bridge is running).
+
+        Lets the HTTP/TLS proxy hold whole messages in the same Intercept tab
+        even when the inline bridge is not the active service."""
+        if self.intercept is None:
+            max_held, auto_rel, overflow = self.intercept_panel.queue_config()
+            self.intercept = InterceptQueue(max_held=max_held, auto_release_s=auto_rel,
+                                            overflow=overflow)
+            self.intercept_panel.set_queue(self.intercept)
+        return self.intercept
 
     def _on_queue_config(self, max_held: int, auto_release_s: float, overflow: str) -> None:
         """Live-update the running queue's volume safeguards."""

@@ -38,6 +38,8 @@ class HeldPacket:
     operator: bool = True                       # True = shown in the GUI queue
     outcome: tuple | None = None             # ("send", bytes) | ("drop", None)
     deadline: float | None = None            # auto-release time (None = never)
+    kind: str = "packet"                     # "packet" (raw frame) | "message" (HTTP)
+    meta: dict | None = None                 # display hints (e.g. summary line)
 
     @property
     def resolved(self) -> bool:
@@ -74,11 +76,12 @@ class InterceptQueue:
     # ---- ingress from the inline path --------------------------------------
     def hold(self, ingress: str, data: bytes,
              on_release: Callable[[bytes | None], None],
-             flow_key: object = None) -> HeldPacket | None:
-        """Park a packet for the operator. Blocks its flow until resolved.
+             flow_key: object = None, kind: str = "packet",
+             meta: dict | None = None) -> HeldPacket | None:
+        """Park a packet/message for the operator. Blocks its flow until resolved.
 
         Returns the HeldPacket, or None if the queue is at capacity — in which
-        case the caller must forward/drop the packet itself (per overflow), so a
+        case the caller must forward/drop the item itself (per overflow), so a
         high-volume stream is never fully absorbed into the queue.
         """
         self.reap()                             # sweep timed-out holds first
@@ -90,7 +93,8 @@ class InterceptQueue:
             key = flow_key if (self.ordered and flow_key is not None) else object()
             deadline = (time.time() + self.auto_release_s) if self.auto_release_s else None
             hp = HeldPacket(self._next_id, ingress, bytes(data), time.time(),
-                            on_release, flow_key=key, operator=True, deadline=deadline)
+                            on_release, flow_key=key, operator=True, deadline=deadline,
+                            kind=kind, meta=meta)
             self._pending[hp.id] = hp
             self._flows.setdefault(key, []).append(hp)
             self.stats["held"] += 1

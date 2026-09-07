@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -44,6 +44,7 @@ class InterceptPanel(QWidget):
         self.queue = None
         self._current_id: int | None = None
         self._work: bytes = b""
+        self._current_kind = "packet"
         self._applying = False
         # Set by the main window: on_filter(match_or_None, text) installs/clears a
         # HOLD rule; on_promote(original, edited) turns an edit into a persistent
@@ -207,13 +208,25 @@ class InterceptPanel(QWidget):
     def set_queue(self, queue) -> None:
         self.queue = queue
         self._current_id = None
+        if not hasattr(self, "_timer"):
+            self._timer = QTimer(self)
+            self._timer.setInterval(200)
+            self._timer.timeout.connect(self._tick)
         if queue is None:
+            self._timer.stop()
             self.table.setRowCount(0)
             self.tree.clear()
             self.hex_edit.clear()
             self.header.setText("Interception queue — held: 0")
             self._set_buttons_enabled(False)
             return
+        self.refresh_pending()
+        self._timer.start()          # self-refresh (works with bridge or proxy)
+
+    def _tick(self) -> None:
+        if self.queue is None:
+            return
+        self.queue.reap()            # auto-release timed-out holds
         self.refresh_pending()
 
     def refresh_pending(self) -> None:
@@ -227,12 +240,16 @@ class InterceptPanel(QWidget):
         for hp in pending:
             r = self.table.rowCount()
             self.table.insertRow(r)
-            try:
-                pkt = __import__("scapy.layers.l2", fromlist=["Ether"]).Ether(hp.data)
-                row = scapy_tree.summarize(pkt)
-                proto, info = row.proto, row.info
-            except Exception:
-                proto, info = "?", ""
+            if hp.kind == "message":
+                proto = "HTTP"
+                info = (hp.meta or {}).get("summary", "")
+            else:
+                try:
+                    pkt = __import__("scapy.layers.l2", fromlist=["Ether"]).Ether(hp.data)
+                    row = scapy_tree.summarize(pkt)
+                    proto, info = row.proto, row.info
+                except Exception:
+                    proto, info = "?", ""
             vals = [str(hp.id), hp.ingress, proto, info, f"{now - hp.ts:.1f}s"]
             for c, v in enumerate(vals):
                 item = QTableWidgetItem(v)
@@ -256,14 +273,22 @@ class InterceptPanel(QWidget):
         if hp is None:
             return
         self._current_id = pid
+        self._current_kind = hp.kind
+        # message items edit as text (HTTP), packets keep the tree + hex view
+        self.btn_apply_hex.setText("Apply text" if hp.kind == "message" else "Apply hex")
+        self.tree.setVisible(hp.kind != "message")
         self._set_work_bytes(hp.data)
         self._set_buttons_enabled(True)
 
     def _set_work_bytes(self, data: bytes) -> None:
         self._work = bytes(data)
-        self._rebuild_tree()
         self._applying = True
-        self.hex_edit.setPlainText(" ".join(f"{b:02x}" for b in self._work))
+        if self._current_kind == "message":
+            self.tree.clear()
+            self.hex_edit.setPlainText(self._work.decode("latin-1"))  # editable HTTP text
+        else:
+            self._rebuild_tree()
+            self.hex_edit.setPlainText(" ".join(f"{b:02x}" for b in self._work))
         self._applying = False
 
     def _rebuild_tree(self) -> None:
@@ -301,7 +326,18 @@ class InterceptPanel(QWidget):
         except Exception:
             self._rebuild_tree()  # revert display on bad input
 
+    def _message_bytes(self) -> bytes:
+        """Encode the edited message text, restoring CRLF line endings.
+
+        Qt's plain-text widget collapses CRLF to LF; HTTP framing needs CRLF, so
+        canonicalize any mix back to CRLF before the bytes go on the wire."""
+        text = self.hex_edit.toPlainText().replace("\r\n", "\n").replace("\r", "\n")
+        return text.replace("\n", "\r\n").encode("latin-1", "ignore")
+
     def _apply_hex(self) -> None:
+        if self._current_kind == "message":
+            self._work = self._message_bytes()
+            return
         raw = self.hex_edit.toPlainText().replace(":", " ").split()
         try:
             data = bytes(int(b, 16) for b in raw)
@@ -312,8 +348,11 @@ class InterceptPanel(QWidget):
     def _resolve(self, action: str) -> None:
         if self.queue is None or self._current_id is None:
             return
+        if action == "modify" and self._current_kind == "message":
+            self._work = self._message_bytes()
         self.queue.resolve(self._current_id, action, self._work if action == "modify" else None)
         self._current_id = None
+        self.tree.setVisible(True)
         self.tree.clear()
         self.hex_edit.clear()
         self._set_buttons_enabled(False)

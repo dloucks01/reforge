@@ -37,7 +37,18 @@ def apply_transforms(raw_msg: bytes, from_client: bool, transforms: list[Callabl
     return http.build_http(msg) if changed else raw_msg
 
 
-def _pump(src, dst, from_client: bool, transforms: list[Callable]) -> None:
+def _emit(dst, raw_msg: bytes, from_client: bool, transforms, interceptor, flow_key) -> None:
+    """Forward one framed message: interactively intercept it, else auto-transform."""
+    if interceptor is not None:
+        out = interceptor.process(raw_msg, from_client, flow_key)
+        if out is not None:                     # None = operator dropped the message
+            dst.sendall(out)
+    else:
+        dst.sendall(apply_transforms(raw_msg, from_client, transforms))
+
+
+def _pump(src, dst, from_client: bool, transforms: list[Callable],
+          interceptor=None, flow_key=None) -> None:
     framer = HttpFramer()
     mode: str | None = None
     try:
@@ -46,9 +57,11 @@ def _pump(src, dst, from_client: bool, transforms: list[Callable]) -> None:
             if not data:
                 rest = framer.flush()
                 if rest:
-                    # a body-delimited-by-close response is now complete: transform it
-                    dst.sendall(apply_transforms(rest, from_client, transforms)
-                                if mode == "http" and looks_http(rest) else rest)
+                    # a body-delimited-by-close response is now complete
+                    if mode == "http" and looks_http(rest):
+                        _emit(dst, rest, from_client, transforms, interceptor, flow_key)
+                    else:
+                        dst.sendall(rest)
                 break
             if mode is None:
                 mode = "http" if looks_http(data) else "raw"
@@ -56,7 +69,7 @@ def _pump(src, dst, from_client: bool, transforms: list[Callable]) -> None:
                 dst.sendall(data)
                 continue
             for msg in framer.feed(data):
-                dst.sendall(apply_transforms(msg, from_client, transforms))
+                _emit(dst, msg, from_client, transforms, interceptor, flow_key)
     except Exception:
         pass
     finally:
@@ -66,9 +79,15 @@ def _pump(src, dst, from_client: bool, transforms: list[Callable]) -> None:
             pass
 
 
-def run_http_relay(client, upstream, transforms: list[Callable]) -> None:
-    """Relay both directions with HTTP framing + transforms; blocks until done."""
-    t1 = threading.Thread(target=_pump, args=(client, upstream, True, transforms), daemon=True)
-    t2 = threading.Thread(target=_pump, args=(upstream, client, False, transforms), daemon=True)
+def run_http_relay(client, upstream, transforms: list[Callable], interceptor=None) -> None:
+    """Relay both directions with HTTP framing + transforms; blocks until done.
+
+    If `interceptor` is given, each framed message is offered to it for
+    interactive hold/edit before forwarding (per connection+direction key)."""
+    key = id(client)
+    t1 = threading.Thread(target=_pump, args=(client, upstream, True, transforms,
+                                              interceptor, (key, "c2s")), daemon=True)
+    t2 = threading.Thread(target=_pump, args=(upstream, client, False, transforms,
+                                              interceptor, (key, "s2c")), daemon=True)
     t1.start(); t2.start()
     t1.join(); t2.join()

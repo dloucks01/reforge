@@ -41,9 +41,11 @@ def so_original_dst(sock: socket.socket) -> tuple[str, int] | None:  # pragma: n
 class TcpProxy:
     def __init__(self, upstream_resolver: Callable[[socket.socket], tuple[str, int]],
                  http_transforms: list[Callable] | None = None,
-                 listen: tuple[str, int] = ("127.0.0.1", 0)):
+                 listen: tuple[str, int] = ("127.0.0.1", 0),
+                 interceptor=None):
         self.resolver = upstream_resolver
         self.transforms = http_transforms or []
+        self.interceptor = interceptor      # optional MessageInterceptor (hold/edit)
         self.listen = listen
         self._srv: socket.socket | None = None
         self._thread: threading.Thread | None = None
@@ -82,7 +84,7 @@ class TcpProxy:
             host, port = self.resolver(client)
             upstream = socket.create_connection((host, port), timeout=10)
             self.flows += 1
-            run_http_relay(client, upstream, self.transforms)
+            run_http_relay(client, upstream, self.transforms, self.interceptor)
         except Exception:
             log.debug("proxy flow error", exc_info=True)
         finally:

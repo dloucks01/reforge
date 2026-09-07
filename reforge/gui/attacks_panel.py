@@ -31,6 +31,9 @@ def _ifaces():
 class AttacksPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        # set by the main window: returns a shared InterceptQueue (and shows it in
+        # the Intercept tab) for interactive message interception.
+        self.get_intercept_queue = None
         self._arp = None
         self._dns = None
         self._name = None
@@ -344,9 +347,32 @@ class AttacksPanel(QWidget):
         for w in (self.tp_sslstrip, self.tp_stripenc, self.tp_cookie, QLabel("Inject:"), self.tp_inject):
             row2.addWidget(w)
         v.addLayout(row2)
+        row3 = QHBoxLayout()
+        self.tp_intercept = QCheckBox("Interactive intercept")
+        self.tp_intercept.setToolTip("Hold matching HTTP messages in the Intercept tab "
+                                     "for edit before forwarding (whole messages, not packets)")
+        self.tp_int_keyword = QLineEdit()
+        self.tp_int_keyword.setPlaceholderText("hold messages containing… (blank = all)")
+        self.tp_int_dir = QComboBox(); self.tp_int_dir.addItems(["both", "requests", "responses"])
+        for w in (self.tp_intercept, QLabel("match:"), self.tp_int_keyword,
+                  QLabel("dir:"), self.tp_int_dir):
+            row3.addWidget(w)
+        v.addLayout(row3)
         self.tp_status = QLabel("idle — redirect victim HTTP → listen port")
         v.addWidget(self.tp_status)
         return box
+
+    def _build_interceptor(self):
+        """A MessageInterceptor sharing the Intercept tab's queue, if enabled."""
+        if not self.tp_intercept.isChecked() or self.get_intercept_queue is None:
+            return None
+        from reforge.attacks.msg_intercept import MessageInterceptor
+
+        queue = self.get_intercept_queue()
+        if queue is None:
+            return None
+        return MessageInterceptor(queue, keyword=self.tp_int_keyword.text().strip(),
+                                  direction=self.tp_int_dir.currentText())
 
     def _build_http_transforms(self) -> list:
         from reforge.attacks import tcp_proxy
@@ -374,11 +400,15 @@ class AttacksPanel(QWidget):
             resolver = (lambda c: tcp_proxy.so_original_dst(c) or ("127.0.0.1", 80))
 
         transforms = self._build_http_transforms()
+        interceptor = self._build_interceptor()
         self._tcp = tcp_proxy.TcpProxy(resolver, http_transforms=transforms,
-                                       listen=("0.0.0.0", self.tp_port.value()))
+                                       listen=("0.0.0.0", self.tp_port.value()),
+                                       interceptor=interceptor)
         try:
             port = self._tcp.start()
-            self.tp_status.setText(f"proxying on :{port} ({len(transforms)} transform(s))")
+            extra = " + interactive intercept" if interceptor else ""
+            self.tp_status.setText(
+                f"proxying on :{port} ({len(transforms)} transform(s)){extra}")
         except Exception as exc:
             self.tp_status.setText(f"error: {exc}")
 
