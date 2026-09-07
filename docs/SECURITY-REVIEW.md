@@ -43,7 +43,7 @@ features.
    (networked use only).** Default bind is loopback. For sensors on another
    host, tunnel it (SSH/WireGuard) or restrict to a trusted segment; an exposed
    port lets an attacker inject false observations or read reported credentials.
-   A security note was added to `distributed/network.py`. Future: optional mTLS.
+   A security note is in `distributed/network.py`; **mutual TLS is now available** (`distributed/tls.py`: server/client cert auth, `dev_mtls()` for quick setup).
 
 5. **Plugin loader executes operator code — by design.** `plugins/` runs
    `register()` from `.py` files in a directory. Only load plugins from a

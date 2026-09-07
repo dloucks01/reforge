@@ -10,15 +10,18 @@ credentials in transit. Do not bind to an untrusted network without a tunnel.
 from __future__ import annotations
 
 import socket
+import ssl
 import threading
 
 from reforge.distributed.collector import Collector
 
 
 class CollectorServer:
-    def __init__(self, collector: Collector, bind: tuple[str, int] = ("127.0.0.1", 0)):
+    def __init__(self, collector: Collector, bind: tuple[str, int] = ("127.0.0.1", 0),
+                 ssl_context=None):
         self.collector = collector
         self.bind = bind
+        self.ssl_context = ssl_context     # mTLS server context (recommended)
         self._srv: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._running = threading.Event()
@@ -44,6 +47,15 @@ class CollectorServer:
                 continue
             except OSError:
                 break
+            if self.ssl_context is not None:
+                try:
+                    conn = self.ssl_context.wrap_socket(conn, server_side=True)
+                except (ssl.SSLError, OSError):
+                    try:
+                        conn.close()
+                    except OSError:
+                        pass
+                    continue                    # reject unauthenticated/invalid clients
             threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
 
     def _serve(self, conn: socket.socket) -> None:
@@ -82,8 +94,12 @@ class CollectorServer:
 class NetworkSink:
     """Callable(Message) that streams messages to a CollectorServer."""
 
-    def __init__(self, host: str, port: int):
-        self.sock = socket.create_connection((host, port), timeout=5)
+    def __init__(self, host: str, port: int, ssl_context=None,
+                 server_hostname: str = "collector"):
+        sock = socket.create_connection((host, port), timeout=5)
+        if ssl_context is not None:
+            sock = ssl_context.wrap_socket(sock, server_hostname=server_hostname)
+        self.sock = sock
 
     def __call__(self, msg) -> None:
         try:
