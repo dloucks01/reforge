@@ -59,6 +59,11 @@ def test_pipeline_selftest_passes():
     assert report.ok
     assert all(s.ok for s in report.steps)
     assert any("checksum" in s.name for s in report.steps)
+    # the self-test also exercises the intercept and HTTP-message paths
+    names = [s.name for s in report.steps]
+    assert "intercept holds a match" in names
+    assert "intercept edit forwards" in names
+    assert "HTTP body rewrite" in names
 
 
 # ---- health ----------------------------------------------------------------

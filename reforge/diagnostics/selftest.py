@@ -75,4 +75,43 @@ def run_selftest() -> SelfTestReport:
             csum_ok = False
     steps.append(SelfTestStep("checksum recomputed", csum_ok))
 
+    # --- interactive intercept: a match is held, then edited and forwarded ---
+    from reforge.core.intercept import InterceptQueue
+
+    iq = InterceptQueue()
+    hold_engine = RuleEngine([Rule("selftest-hold",
+                                   M.FieldMatch("UDP", "dport", "eq", 40404), [A.Hold()])])
+    ibridge = UserspaceBridge("selfA", "selfB", hold_engine, intercept=iq)
+    iout: list[bytes] = []
+    ibridge._forward("selfA", marker, iout.append)
+    held_ok = iq.count() == 1 and iout == []          # held, nothing forwarded yet
+    steps.append(SelfTestStep("intercept holds a match", held_ok, f"held={iq.count()}"))
+
+    edit_ok = False
+    if held_ok:
+        edited = marker.replace(b"REFORGE-SELFTEST", b"REFORGE-EDITED!!")   # same length
+        iq.resolve(iq.pending()[0].id, "modify", edited)
+        edit_ok = len(iout) == 1 and b"REFORGE-EDITED" in iout[0]
+    steps.append(SelfTestStep("intercept edit forwards", edit_ok))
+
+    # --- HTTP message framing + body rewrite (the message-intercept path) ---
+    from reforge.attacks.http_relay import apply_transforms
+    from reforge.core.httpframer import HttpFramer
+
+    req = b"POST / HTTP/1.1\r\nHost: t\r\nContent-Length: 10\r\n\r\nuser=admin"
+    framer = HttpFramer()
+    framed = [m for m in framer.feed(req)]
+    frame_ok = len(framed) == 1 and framed[0] == req
+    steps.append(SelfTestStep("HTTP message framed", frame_ok, f"{len(framed)} message(s)"))
+
+    def _rewrite(msg, from_client):
+        if b"admin" in msg.body:
+            msg.body = msg.body.replace(b"admin", b"guest")     # same length
+            return True
+        return False
+
+    rewritten = apply_transforms(req, True, [_rewrite])
+    body_ok = b"user=guest" in rewritten and b"admin" not in rewritten
+    steps.append(SelfTestStep("HTTP body rewrite", body_ok))
+
     return SelfTestReport(ok=all(s.ok for s in steps), steps=steps)

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from reforge.capture.registry import list_interfaces
+from reforge.gui.errors import explain
 
 
 def _ifaces():
@@ -99,7 +100,7 @@ class AttacksPanel(QWidget):
             ok = self._arp.start()
             self.arp_status.setText("poisoning…" if ok else "failed to resolve MACs (root? live net?)")
         except Exception as exc:
-            self.arp_status.setText(f"error: {exc}")
+            self.arp_status.setText(f"error: {explain(exc)}")
 
     def _arp_stop(self):
         if self._arp:
@@ -150,7 +151,7 @@ class AttacksPanel(QWidget):
             self._dns.start()
             self.dns_status.setText(f"spoofing ({len(hostmap)} mappings)…")
         except Exception as exc:
-            self.dns_status.setText(f"error: {exc}")
+            self.dns_status.setText(f"error: {explain(exc)}")
 
     def _dns_stop(self):
         if self._dns:
@@ -185,7 +186,7 @@ class AttacksPanel(QWidget):
             self._name.start()
             self.name_status.setText("poisoning name queries…")
         except Exception as exc:
-            self.name_status.setText(f"error: {exc}")
+            self.name_status.setText(f"error: {explain(exc)}")
 
     def _name_stop(self):
         if self._name:
@@ -229,7 +230,7 @@ class AttacksPanel(QWidget):
             self._dhcp.start()
             self.dhcp_status.setText(f"{self.dhcp_mode.currentText()} running on {iface}…")
         except Exception as exc:
-            self.dhcp_status.setText(f"error: {exc}")
+            self.dhcp_status.setText(f"error: {explain(exc)}")
 
     def _dhcp_stop(self):
         if self._dhcp:
@@ -274,7 +275,7 @@ class AttacksPanel(QWidget):
             self._ndp.start()
             self.ndp_status.setText(f"{self.ndp_mode.currentText()} running on {iface}…")
         except Exception as exc:
-            self.ndp_status.setText(f"error: {exc}")
+            self.ndp_status.setText(f"error: {explain(exc)}")
 
     def _ndp_stop(self):
         if self._ndp:
@@ -325,7 +326,7 @@ class AttacksPanel(QWidget):
             self.tls_status.setText(f"intercepting on :{port}{extra} — export + install "
                                     f"the CA, redirect 443→{port}")
         except Exception as exc:
-            self.tls_status.setText(f"error: {exc}")
+            self.tls_status.setText(f"error: {explain(exc)}")
 
     def _tls_stop(self):
         if self._tls:
@@ -449,7 +450,7 @@ class AttacksPanel(QWidget):
             self.tp_status.setText(
                 f"proxying on :{port} ({len(transforms)} transform(s)){extra}")
         except Exception as exc:
-            self.tp_status.setText(f"error: {exc}")
+            self.tp_status.setText(f"error: {explain(exc)}")
 
     def _tcp_stop(self):
         if self._tcp:
