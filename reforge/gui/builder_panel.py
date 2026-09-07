@@ -8,8 +8,8 @@ and save/load templates.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -32,9 +32,31 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from reforge.craft import builder, sender
 from reforge.capture.registry import list_interfaces
+from reforge.craft import builder, sender
 from reforge.dissect import scapy_tree
+
+
+def _L(layer: str, **fields) -> dict:
+    return {"layer": layer, "fields": {k: str(v) for k, v in fields.items()}}
+
+
+# common starting points: (name, {"layers": [...]})
+_TEMPLATES = [
+    ("TCP SYN", {"layers": [_L("Ether"), _L("IP", dst="10.0.0.1"),
+                            _L("TCP", dport=80, flags="S")]}),
+    ("HTTP GET", {"layers": [_L("Ether"), _L("IP", dst="10.0.0.1"),
+                             _L("TCP", dport=80, flags="PA"),
+                             _L("Raw", load="GET / HTTP/1.1\r\nHost: target\r\n\r\n")]}),
+    ("ICMP echo", {"layers": [_L("Ether"), _L("IP", dst="10.0.0.1"), _L("ICMP", type=8)]}),
+    ("UDP datagram", {"layers": [_L("Ether"), _L("IP", dst="10.0.0.1"), _L("UDP", dport=53)]}),
+    ("DNS query", {"layers": [_L("Ether"), _L("IP", dst="8.8.8.8"),
+                              _L("UDP", dport=53), _L("DNS", rd=1)]}),
+    ("ARP request", {"layers": [_L("Ether", dst="ff:ff:ff:ff:ff:ff"),
+                                _L("ARP", op=1, pdst="10.0.0.1")]}),
+    ("VLAN + TCP", {"layers": [_L("Ether"), _L("Dot1Q", vlan=100),
+                               _L("IP", dst="10.0.0.1"), _L("TCP", dport=80, flags="S")]}),
+]
 
 
 class BuilderPanel(QWidget):
@@ -56,9 +78,15 @@ class BuilderPanel(QWidget):
         dn = QPushButton("↓"); dn.clicked.connect(lambda: self._move(1))
         from_cap = QPushButton("Load from capture"); from_cap.clicked.connect(self._load_from_capture)
         clr = QPushButton("Clear"); clr.clicked.connect(self._clear)
+        self.template_combo = QComboBox(); self.template_combo.addItem("Templates…")
+        for name, _spec in _TEMPLATES:
+            self.template_combo.addItem(name)
+        self.template_combo.setToolTip("Start from a common packet template")
+        self.template_combo.activated.connect(self._apply_template)
         for w in (QLabel("Layer:"), self.layer_combo, add, rm, up, dn):
             palette.addWidget(w)
         palette.addStretch(1)
+        palette.addWidget(self.template_combo)
         palette.addWidget(from_cap); palette.addWidget(clr)
         root.addLayout(palette)
 
@@ -282,6 +310,15 @@ class BuilderPanel(QWidget):
     def load_spec(self, spec: dict) -> None:
         self.layers = list(spec.get("layers", []))
         self._refresh_stack(select=0)
+
+    def _apply_template(self, index: int) -> None:
+        if index <= 0:
+            return
+        import copy
+
+        self.load_spec(copy.deepcopy(_TEMPLATES[index - 1][1]))
+        self.template_combo.setCurrentIndex(0)      # behave like a menu
+        self.status.setText(f"Loaded template: {_TEMPLATES[index - 1][0]} — edit and send.")
 
     def _load_from_capture(self) -> None:
         if self._get_selected is None:

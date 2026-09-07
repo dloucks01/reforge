@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
@@ -27,6 +27,17 @@ from reforge.scan.targets import expand_targets, parse_ports
 
 COLS = ["Host", "Port", "State", "Service / MAC"]
 
+# common port sets: (label, ports expression)
+_PORT_SETS = [
+    ("Top 20", "21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080"),
+    ("Web", "80,443,8080,8443,8000,8888"),
+    ("Windows/AD", "88,135,139,389,445,464,636,3389,5985,5986"),
+    ("Databases", "1433,1521,3306,5432,6379,9200,11211,27017"),
+    ("Remote/mgmt", "22,23,3389,5900,5985,161,623"),
+    ("System 1-1024", "1-1024"),
+    ("All 1-65535", "1-65535"),
+]
+
 
 class ScanPanel(QWidget):
     def __init__(self, get_inventory: Callable | None = None, parent=None):
@@ -39,12 +50,17 @@ class ScanPanel(QWidget):
         row = QHBoxLayout()
         self.target = QLineEdit(); self.target.setPlaceholderText("target: 10.0.0.0/24, host, or 10.0.0.1-20")
         self.ports = QLineEdit("22,80,443,445,3389,8080")
+        self.port_preset = QComboBox(); self.port_preset.addItem("Ports…")
+        for label, _spec in _PORT_SETS:
+            self.port_preset.addItem(label)
+        self.port_preset.setToolTip("Fill the ports box with a common set")
+        self.port_preset.activated.connect(self._apply_port_preset)
         self.mode = QComboBox(); self.mode.addItems(["connect", "syn", "arp-discover"])
         self.iface = QComboBox(); self.iface.addItems(list_interfaces() or ["<none>"])
         self.banners = QCheckBox("banners"); self.banners.setChecked(True)
         self.run_btn = QPushButton("Scan"); self.run_btn.clicked.connect(self.run_scan)
         for w in (QLabel("Target:"), self.target, QLabel("Ports:"), self.ports,
-                  QLabel("Mode:"), self.mode, QLabel("Iface:"), self.iface,
+                  self.port_preset, QLabel("Mode:"), self.mode, QLabel("Iface:"), self.iface,
                   self.banners, self.run_btn):
             row.addWidget(w)
         root.addLayout(row)
@@ -61,6 +77,12 @@ class ScanPanel(QWidget):
 
         self._poll = QTimer(self); self._poll.setInterval(300)
         self._poll.timeout.connect(self._check)
+
+    def _apply_port_preset(self, index: int) -> None:
+        if index <= 0:
+            return
+        self.ports.setText(_PORT_SETS[index - 1][1])
+        self.port_preset.setCurrentIndex(0)         # behave like a menu
 
     def run_scan(self) -> None:
         if self._worker and self._worker.is_alive():

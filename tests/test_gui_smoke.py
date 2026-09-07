@@ -179,3 +179,25 @@ def test_intercept_presets_fill_filter(app):
     assert ip.enable_check.isChecked()
     assert ip.filter_edit.text() and captured.get("match") is not None
     assert ip.preset_combo.currentIndex() == 0      # resets like a menu
+
+
+def test_builder_templates_build(app):
+    from reforge.craft import builder
+    from reforge.gui.builder_panel import _TEMPLATES, BuilderPanel
+
+    for _name, spec in _TEMPLATES:                  # every template is valid
+        assert len(builder.spec_to_bytes(spec)) >= 14
+    bp = BuilderPanel()
+    bp._apply_template(2)                           # HTTP GET
+    assert [lyr["layer"] for lyr in bp.layers][:2] == ["Ether", "IP"]
+    assert bp.template_combo.currentIndex() == 0
+    assert bp._current_bytes() is not None
+
+
+def test_scan_port_presets(app):
+    from reforge.gui.scan_panel import _PORT_SETS, ScanPanel
+
+    sp = ScanPanel()
+    sp._apply_port_preset(2)
+    assert sp.ports.text() == _PORT_SETS[1][1]
+    assert sp.port_preset.currentIndex() == 0
