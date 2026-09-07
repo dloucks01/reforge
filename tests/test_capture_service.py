@@ -31,3 +31,35 @@ def test_service_captures_all(tmp_path):
     assert len(collected) == 20
     assert service.captured == 20
     assert service.dropped == 0
+
+
+def test_service_records_error_reason():
+    import time
+
+    from reforge.capture.base import BackendCaps
+    from reforge.core.capture_service import CaptureService
+
+    class DyingBackend:
+        caps = BackendCaps(name="dying", l2_rewrite=False, inject=False,
+                           max_speed_hint="n/a", needs_root=False, notes="")
+
+        def open(self):
+            pass
+
+        def recv_burst(self, *a, **k):
+            raise OSError(19, "No such device")
+
+        def send_burst(self, frames):
+            return 0
+
+        def close(self):
+            pass
+
+    svc = CaptureService(DyingBackend())
+    svc.start()
+    for _ in range(50):
+        if not svc.running:
+            break
+        time.sleep(0.01)
+    assert not svc.running
+    assert svc.error and "No such device" in svc.error

@@ -587,7 +587,11 @@ class MainWindow(QMainWindow):
         self.recon_panel.refresh()
         n = self._flush_rows()
         if n == 0 and not self.service.running:
+            err = getattr(self.service, "error", None)
             self.stop_capture()
+            if err:                             # stopped on an error (e.g. iface lost)
+                self.statusBar().showMessage(f"Capture stopped: {err}")
+                QMessageBox.warning(self, "Capture stopped", f"The capture stopped:\n\n{err}")
         elif n:
             self.statusBar().showMessage(f"Capturing — {len(self.packets)} packets")
 

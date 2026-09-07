@@ -315,3 +315,30 @@ def test_intercept_transform_indicator_and_clear(app):
     assert w.intercept_panel.xform_row.isHidden()            # gone
     assert w._transforms == []
     assert not [r for r in w.engine.rules if r.name.startswith("__xform__")]
+
+
+def test_gui_surfaces_capture_error(app, monkeypatch):
+    """An unexpected capture stop with an error is surfaced, not silent."""
+    from reforge.gui import main_window as mw
+    from reforge.gui.main_window import MainWindow
+
+    warned = {}
+    monkeypatch.setattr(mw.QMessageBox, "warning",
+                        lambda *a, **k: warned.setdefault("msg", a[-1]))
+
+    class StoppedService:
+        running = False
+        error = "OSError: No such device"
+
+        def drain(self, *a, **k):
+            return []
+
+        def stop(self, *a, **k):
+            pass
+
+    w = MainWindow()
+    w.service = StoppedService()
+    w._t0 = 0.0
+    w._drain()                                    # sees stopped+error -> surfaces it
+    assert "No such device" in warned.get("msg", "")
+    assert w.service is None                       # and cleaned up

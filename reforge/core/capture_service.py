@@ -22,11 +22,12 @@ log = logging.getLogger("reforge.capture_service")
 class CaptureService:
     def __init__(self, backend: CaptureBackend, max_queue: int = 100_000):
         self.backend = backend
-        self.queue: "Queue[tuple[float, Frame]]" = Queue(maxsize=max_queue)
+        self.queue: Queue[tuple[float, Frame]] = Queue(maxsize=max_queue)
         self._thread: threading.Thread | None = None
         self._running = threading.Event()
         self.dropped = 0
         self.captured = 0
+        self.error: str | None = None       # set if the loop stops on an error
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -53,7 +54,8 @@ class CaptureService:
                         self.captured += 1
                     except Exception:
                         self.dropped += 1  # backpressure: count, never block the wire
-        except Exception:
+        except Exception as exc:
+            self.error = f"{type(exc).__name__}: {exc}"   # e.g. interface removed
             log.exception("capture loop error")
         finally:
             self.backend.close()
