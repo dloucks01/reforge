@@ -131,3 +131,61 @@ def test_tls_interception_decrypts_and_modifies():
     subject = dict(x[0] for x in peer["subject"])
     assert subject.get("commonName") == "localhost"
     assert interceptor.intercepted == 1
+
+
+def test_tls_interception_rewrites_large_https_body():
+    """HTTPS large multi-segment body rewritten via the shared HTTP relay."""
+    from reforge.attacks import tcp_proxy
+
+    ca = DynamicCA()
+    up_ctx = ca.context_for("localhost")
+    up_srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    up_srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    up_srv.bind(("127.0.0.1", 0)); up_srv.listen(1)
+    up_port = up_srv.getsockname()[1]
+
+    body = b"<html><body>" + b"<p>x</p>" * 8000 + b"</body></html>"   # ~56 KB
+    response = (b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: "
+                + str(len(body)).encode() + b"\r\n\r\n" + body)
+
+    def upstream():
+        up_srv.settimeout(8)
+        conn, _ = up_srv.accept()
+        tconn = up_ctx.wrap_socket(conn, server_side=True)
+        tconn.recv(65536)
+        for i in range(0, len(response), 1400):
+            tconn.sendall(response[i:i + 1400])
+        tconn.close()
+
+    threading.Thread(target=upstream, daemon=True).start()
+
+    interceptor = TlsInterceptor(
+        ca, listen=("127.0.0.1", 0),
+        upstream_resolver=lambda sni: ("127.0.0.1", up_port),
+        http_transforms=[tcp_proxy.inject(b"<script>PWN</script>")],
+    )
+    px_port = interceptor.start()
+    try:
+        cctx = ssl.create_default_context()
+        cctx.load_verify_locations(cadata=ca.ca_pem().decode())
+        raw = socket.create_connection(("127.0.0.1", px_port), timeout=8)
+        tls = cctx.wrap_socket(raw, server_hostname="localhost")
+        tls.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        data = b""; tls.settimeout(8)
+        while True:
+            try:
+                chunk = tls.recv(65536)
+            except socket.timeout:
+                break
+            if not chunk:
+                break
+            data += chunk
+        tls.close()
+    finally:
+        interceptor.stop(); up_srv.close()
+
+    head, _, rbody = data.partition(b"\r\n\r\n")
+    assert b"<script>PWN</script></body>" in rbody      # injected into HTTPS body
+    assert len(rbody) > 50000                            # large, multi-segment
+    cl = int(dict(h.split(b": ", 1) for h in head.split(b"\r\n")[1:])[b"Content-Length"])
+    assert cl == len(rbody)                              # Content-Length corrected

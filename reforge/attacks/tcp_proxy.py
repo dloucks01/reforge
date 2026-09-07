@@ -21,12 +21,10 @@ import threading
 from typing import Callable
 
 from reforge.attacks import http
-from reforge.core.httpframer import HttpFramer
 
 log = logging.getLogger("reforge.tcpproxy")
 
 SO_ORIGINAL_DST = 80
-_METHODS = (b"GET", b"POST", b"PUT", b"HEAD", b"DELETE", b"OPTIONS", b"PATCH", b"HTTP/")
 
 
 def so_original_dst(sock: socket.socket) -> tuple[str, int] | None:  # pragma: no cover
@@ -38,10 +36,6 @@ def so_original_dst(sock: socket.socket) -> tuple[str, int] | None:  # pragma: n
         return host, port
     except Exception:
         return None
-
-
-def _looks_http(data: bytes) -> bool:
-    return data[:8].startswith(_METHODS)
 
 
 class TcpProxy:
@@ -81,15 +75,14 @@ class TcpProxy:
             threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
 
     def _handle(self, client: socket.socket) -> None:
+        from reforge.attacks.http_relay import run_http_relay
+
         upstream = None
         try:
             host, port = self.resolver(client)
             upstream = socket.create_connection((host, port), timeout=10)
             self.flows += 1
-            t1 = threading.Thread(target=self._pump, args=(client, upstream, True), daemon=True)
-            t2 = threading.Thread(target=self._pump, args=(upstream, client, False), daemon=True)
-            t1.start(); t2.start()
-            t1.join(); t2.join()
+            run_http_relay(client, upstream, self.transforms)
         except Exception:
             log.debug("proxy flow error", exc_info=True)
         finally:
@@ -99,44 +92,6 @@ class TcpProxy:
                         s.close()
                 except Exception:
                     pass
-
-    def _pump(self, src: socket.socket, dst: socket.socket, from_client: bool) -> None:
-        framer = HttpFramer()
-        mode: str | None = None
-        try:
-            while True:
-                data = src.recv(65536)
-                if not data:
-                    rest = framer.flush()
-                    if rest:
-                        dst.sendall(rest)
-                    break
-                if mode is None:
-                    mode = "http" if _looks_http(data) else "raw"
-                if mode == "raw":
-                    dst.sendall(data)
-                    continue
-                for msg in framer.feed(data):
-                    dst.sendall(self._apply(msg, from_client))
-        except Exception:
-            pass
-        finally:
-            try:
-                dst.shutdown(socket.SHUT_WR)
-            except Exception:
-                pass
-
-    def _apply(self, raw_msg: bytes, from_client: bool) -> bytes:
-        msg = http.parse_http(raw_msg)
-        if msg is None:
-            return raw_msg
-        changed = False
-        for fn in self.transforms:
-            try:
-                changed = fn(msg, from_client) or changed
-            except Exception:
-                log.debug("transform error", exc_info=True)
-        return http.build_http(msg) if changed else raw_msg
 
     def stop(self) -> None:
         self._running.clear()

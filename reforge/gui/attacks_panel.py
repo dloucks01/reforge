@@ -181,7 +181,9 @@ class AttacksPanel(QWidget):
         b_start = QPushButton("Start"); b_start.clicked.connect(self._tls_start)
         b_stop = QPushButton("Stop"); b_stop.clicked.connect(self._tls_stop)
         b_ca = QPushButton("Export CA cert"); b_ca.clicked.connect(self._tls_export_ca)
-        for w in (QLabel("Listen port:"), self.tls_port, b_start, b_stop, b_ca):
+        self.tls_rewrite = QCheckBox("apply HTTP rewrite")
+        self.tls_rewrite.setToolTip("Run the TCP-proxy HTTP transforms on decrypted HTTPS")
+        for w in (QLabel("Listen port:"), self.tls_port, b_start, b_stop, b_ca, self.tls_rewrite):
             row.addWidget(w)
         row.addStretch(1)
         v.addLayout(row)
@@ -201,11 +203,14 @@ class AttacksPanel(QWidget):
 
         self._tls_stop()
         ca = self._ensure_ca()
-        self._tls = TlsInterceptor(ca, listen=("0.0.0.0", self.tls_port.value()))
+        transforms = self._build_http_transforms() if self.tls_rewrite.isChecked() else None
+        self._tls = TlsInterceptor(ca, listen=("0.0.0.0", self.tls_port.value()),
+                                   http_transforms=transforms)
         try:
             port = self._tls.start()
-            self.tls_status.setText(f"intercepting on :{port} — export + install the CA, "
-                                    f"redirect 443→{port}")
+            extra = f" + HTTP rewrite ({len(transforms)})" if transforms else ""
+            self.tls_status.setText(f"intercepting on :{port}{extra} — export + install "
+                                    f"the CA, redirect 443→{port}")
         except Exception as exc:
             self.tls_status.setText(f"error: {exc}")
 
@@ -250,6 +255,20 @@ class AttacksPanel(QWidget):
         v.addWidget(self.tp_status)
         return box
 
+    def _build_http_transforms(self) -> list:
+        from reforge.attacks import tcp_proxy
+
+        transforms = []
+        if self.tp_sslstrip.isChecked():
+            transforms.append(tcp_proxy.sslstrip())
+        if self.tp_stripenc.isChecked():
+            transforms.append(tcp_proxy.strip_accept_encoding())
+        if self.tp_cookie.isChecked():
+            transforms.append(tcp_proxy.strip_secure_cookie())
+        if self.tp_inject.text().strip():
+            transforms.append(tcp_proxy.inject(self.tp_inject.text().encode()))
+        return transforms
+
     def _tcp_start(self):
         from reforge.attacks import tcp_proxy
 
@@ -261,16 +280,7 @@ class AttacksPanel(QWidget):
         else:
             resolver = (lambda c: tcp_proxy.so_original_dst(c) or ("127.0.0.1", 80))
 
-        transforms = []
-        if self.tp_sslstrip.isChecked():
-            transforms.append(tcp_proxy.sslstrip())
-        if self.tp_stripenc.isChecked():
-            transforms.append(tcp_proxy.strip_accept_encoding())
-        if self.tp_cookie.isChecked():
-            transforms.append(tcp_proxy.strip_secure_cookie())
-        if self.tp_inject.text().strip():
-            transforms.append(tcp_proxy.inject(self.tp_inject.text().encode()))
-
+        transforms = self._build_http_transforms()
         self._tcp = tcp_proxy.TcpProxy(resolver, http_transforms=transforms,
                                        listen=("0.0.0.0", self.tp_port.value()))
         try:

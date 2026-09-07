@@ -29,12 +29,14 @@ class TlsInterceptor:
                  listen: tuple[str, int] = ("127.0.0.1", 0),
                  upstream_resolver: Callable[[str], tuple[str, int]] | None = None,
                  modify: Callable[[bytes, bool], bytes] | None = None,
+                 http_transforms: list[Callable] | None = None,
                  verify_upstream: bool = False,
                  default_host: str = "localhost"):
         self.ca = ca or DynamicCA()
         self.listen = listen
         self.resolver = upstream_resolver or (lambda sni: (sni, 443))
-        self.modify = modify
+        self.modify = modify                      # raw per-chunk hook (optional)
+        self.http_transforms = http_transforms    # message-framed HTTP toolkit
         self.verify_upstream = verify_upstream
         self.default_host = default_host
         self._srv: socket.socket | None = None
@@ -84,7 +86,14 @@ class TlsInterceptor:
             tls_up = cctx.wrap_socket(up, server_hostname=sni)
 
             self.intercepted += 1
-            self._relay(tls_client, tls_up)
+            if self.http_transforms is not None:
+                # Full HTTP framing + toolkit transforms on the decrypted stream
+                # (same path as the plaintext TCP proxy) — HTTPS large-body rewrite.
+                from reforge.attacks.http_relay import run_http_relay
+
+                run_http_relay(tls_client, tls_up, self.http_transforms)
+            else:
+                self._relay(tls_client, tls_up)   # raw per-chunk modify hook
         except Exception:
             log.debug("TLS intercept error", exc_info=True)
             try:
