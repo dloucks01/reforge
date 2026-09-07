@@ -168,10 +168,10 @@ class UserspaceBridge:
             return
 
         if res.disposition is Disposition.HOLD:
-            self.counters.held += 1
             if self.intercept is not None:
                 self._park(ingress, data, send_peer)
                 return
+            self.counters.held += 1
             # no interception queue attached: pass through
             send_peer(data)
             self._remember_sent(data)
@@ -262,9 +262,28 @@ class UserspaceBridge:
         self._bump_dir(ingress, 1)
 
     def _park(self, ingress: str, data: bytes, send_peer) -> None:
-        """Divert a held packet to the interception queue (non-blocking)."""
-        self.intercept.hold(ingress, data, self._egress_release(ingress, send_peer, data),
-                            flow_key=self._flow_key(ingress, data))
+        """Divert a held packet to the interception queue (non-blocking).
+
+        If the queue is at capacity, the packet is not held: it is forwarded (in
+        flow order) or dropped per the queue's overflow policy, so a high-volume
+        stream never fully piles up in the queue."""
+        fk = self._flow_key(ingress, data)
+        hp = self.intercept.hold(ingress, data,
+                                 self._egress_release(ingress, send_peer, data), flow_key=fk)
+        if hp is not None:
+            self.counters.held += 1
+            return
+        # overflow: at capacity -> handle without holding, preserving flow order
+        if self.intercept.overflow == "drop":
+            self.counters.dropped += 1
+            return
+        if self.intercept.passthrough(ingress, data,
+                                      self._egress_release(ingress, send_peer, data), fk):
+            return                              # queued behind an earlier held packet
+        send_peer(data)
+        self._remember_sent(data)
+        self.counters.forwarded += 1
+        self._bump_dir(ingress, 1)
 
     def process_frame(self, ingress: str, data: bytes) -> list[bytes]:
         """Pure form for tests/headless: returns bytes to send on the peer port.

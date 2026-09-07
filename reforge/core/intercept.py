@@ -37,6 +37,7 @@ class HeldPacket:
     flow_key: object = None
     operator: bool = True                       # True = shown in the GUI queue
     outcome: tuple | None = None             # ("send", bytes) | ("drop", None)
+    deadline: float | None = None            # auto-release time (None = never)
 
     @property
     def resolved(self) -> bool:
@@ -44,30 +45,77 @@ class HeldPacket:
 
 
 class InterceptQueue:
-    def __init__(self, ordered: bool = True):
+    """Interactive hold queue with in-order release and volume safeguards.
+
+    max_held  : cap on packets held for the operator at once (0 = unlimited).
+                Once full, further matches are auto-resolved per `overflow`
+                instead of held, so a busy stream never drowns the queue. This
+                doubles as the 'step through N at a time' control.
+    auto_release_s : a held packet not resolved within this many seconds is
+                auto-resolved per `overflow` (0 = never), so a stalled flow does
+                not block the wire or grow memory unbounded.
+    overflow  : 'forward' | 'drop' — what auto-resolution does.
+    """
+
+    def __init__(self, ordered: bool = True, max_held: int = 0,
+                 auto_release_s: float = 0.0, overflow: str = "forward"):
         self.ordered = ordered
+        self.max_held = max_held
+        self.auto_release_s = auto_release_s
+        self.overflow = overflow if overflow in ("forward", "drop") else "forward"
         self._pending: dict[int, HeldPacket] = {}   # operator-visible, unresolved holds
         self._flows: dict[object, list[HeldPacket]] = {}  # per-flow FIFO (hold + passthrough)
         self._lock = threading.Lock()
         self._next_id = 0
         self._new: Queue[int] = Queue()
-        self.stats = {"held": 0, "forwarded": 0, "modified": 0, "dropped": 0}
+        self.stats = {"held": 0, "forwarded": 0, "modified": 0, "dropped": 0,
+                      "auto_released": 0, "overflowed": 0}
 
     # ---- ingress from the inline path --------------------------------------
     def hold(self, ingress: str, data: bytes,
              on_release: Callable[[bytes | None], None],
-             flow_key: object = None) -> HeldPacket:
-        """Park a packet for the operator. Blocks its flow until resolved."""
+             flow_key: object = None) -> HeldPacket | None:
+        """Park a packet for the operator. Blocks its flow until resolved.
+
+        Returns the HeldPacket, or None if the queue is at capacity — in which
+        case the caller must forward/drop the packet itself (per overflow), so a
+        high-volume stream is never fully absorbed into the queue.
+        """
+        self.reap()                             # sweep timed-out holds first
         with self._lock:
+            if self.max_held and len(self._pending) >= self.max_held:
+                self.stats["overflowed"] += 1
+                return None                     # at capacity: caller handles it
             self._next_id += 1
             key = flow_key if (self.ordered and flow_key is not None) else object()
+            deadline = (time.time() + self.auto_release_s) if self.auto_release_s else None
             hp = HeldPacket(self._next_id, ingress, bytes(data), time.time(),
-                            on_release, flow_key=key, operator=True)
+                            on_release, flow_key=key, operator=True, deadline=deadline)
             self._pending[hp.id] = hp
             self._flows.setdefault(key, []).append(hp)
             self.stats["held"] += 1
         self._new.put(hp.id)
         return hp
+
+    def reap(self) -> int:
+        """Auto-resolve holds past their deadline (keeps the wire from stalling)."""
+        if not self.auto_release_s:
+            return 0
+        now = time.time()
+        ready: list[HeldPacket] = []
+        expired = 0
+        with self._lock:
+            due = [hp for hp in self._pending.values()
+                   if hp.deadline is not None and hp.deadline <= now]
+            for hp in due:
+                self._pending.pop(hp.id, None)
+                hp.outcome = ("send", hp.data) if self.overflow == "forward" else ("drop", None)
+                self.stats["auto_released"] += 1
+                expired += 1
+                ready += self._drain_flow_locked(hp.flow_key)
+        for h in ready:
+            self._deliver(h)
+        return expired
 
     def passthrough(self, ingress: str, data: bytes,
                     on_release: Callable[[bytes | None], None],

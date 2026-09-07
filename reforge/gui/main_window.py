@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
         self.intercept: InterceptQueue | None = None
         self.engine = None                 # live engine while a bridge runs
         self._intercept_filter: tuple | None = None  # (match, text) to hold
+        self._transforms: list = []                   # persistent promoted rewrite rules
         self.packets: list[tuple[float, Frame]] = []  # captured (ts, frame)
         self._t0: float | None = None
 
@@ -289,6 +290,8 @@ class MainWindow(QMainWindow):
         intercept_dock = QDockWidget("Intercept", self)
         self.intercept_panel = InterceptPanel()
         self.intercept_panel.on_filter = self._on_intercept_filter
+        self.intercept_panel.on_promote = self._on_intercept_promote
+        self.intercept_panel.on_queue_config = self._on_queue_config
         intercept_dock.setWidget(self.intercept_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, intercept_dock)
         self.tabifyDockWidget(rules_dock, intercept_dock)
@@ -341,7 +344,9 @@ class MainWindow(QMainWindow):
         engine = self.rules_panel.build_engine(dry_run=False)
         self.engine = engine
         self._install_intercept_filter(engine)
-        self.intercept = InterceptQueue()
+        max_held, auto_rel, overflow = self.intercept_panel.queue_config()
+        self.intercept = InterceptQueue(max_held=max_held, auto_release_s=auto_rel,
+                                        overflow=overflow)
         self.intercept_panel.set_queue(self.intercept)
         armed = self.act_arm.isChecked()
         bridge = UserspaceBridge(a, b, engine, intercept=self.intercept, armed=armed,
@@ -391,19 +396,52 @@ class MainWindow(QMainWindow):
         elif match is not None:
             self.statusBar().showMessage("Intercept filter armed — starts with the bridge")
 
+    _TRANSFORM_PREFIX = "__xform__"
+
     def _install_intercept_filter(self, engine) -> None:
-        """Rebuild the engine rule list with the intercept HOLD rule at the front.
+        """Rebuild the engine rule list: promoted transforms, then the HOLD rule.
 
         A new list is assigned atomically, so the bridge worker thread iterating
-        the old list is never disturbed mid-evaluation."""
+        the old list is never disturbed mid-evaluation. Transforms run as normal
+        FORWARD rewrites; the HOLD rule sits in front so interactive catching (if
+        still enabled) takes precedence over the auto-transforms."""
         from reforge.rules.actions import Hold
         from reforge.rules.base import Rule
 
-        rules = [r for r in engine.rules if r.name != self._INTERCEPT_RULE]
+        base = [r for r in engine.rules
+                if r.name != self._INTERCEPT_RULE
+                and not r.name.startswith(self._TRANSFORM_PREFIX)]
+        rules = list(self._transforms) + base
         if self._intercept_filter is not None:
             match, _text = self._intercept_filter
             rules.insert(0, Rule(self._INTERCEPT_RULE, match, [Hold()]))
         engine.rules = rules
+
+    def _on_intercept_promote(self, original: bytes, edited: bytes) -> str:
+        """Turn one interactive edit into a persistent transform on all matches."""
+        from reforge.rules.base import Rule
+        from reforge.rules.derive import derive_actions, describe_actions
+        from reforge.rules.matchers import AllMatch
+
+        actions = derive_actions(original, edited, link="ether")
+        if not actions:
+            return "No change to promote — edit the packet first."
+        # scope the transform to the current catch filter, else to any packet
+        # (a payload find/replace self-scopes to packets containing the pattern).
+        match = self._intercept_filter[0] if self._intercept_filter is not None else AllMatch()
+        name = f"{self._TRANSFORM_PREFIX}{len(self._transforms) + 1}"
+        self._transforms.append(Rule(name, match, actions))
+        if self.engine is not None:
+            self._install_intercept_filter(self.engine)
+        desc = describe_actions(actions)
+        return f"Transform added ({desc}) — applies to all matching traffic and resends."
+
+    def _on_queue_config(self, max_held: int, auto_release_s: float, overflow: str) -> None:
+        """Live-update the running queue's volume safeguards."""
+        if self.intercept is not None:
+            self.intercept.max_held = max_held
+            self.intercept.auto_release_s = auto_release_s
+            self.intercept.overflow = overflow if overflow in ("forward", "drop") else "forward"
 
     def stop_capture(self) -> None:
         self.timer.stop()
@@ -446,6 +484,7 @@ class MainWindow(QMainWindow):
         if not self.service:
             return
         if self.intercept is not None:
+            self.intercept.reap()               # auto-release timed-out holds
             self.intercept_panel.refresh_pending()
         self.diag_panel.refresh_health()
         self.recon_panel.refresh()

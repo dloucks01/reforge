@@ -13,12 +13,14 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -44,8 +46,11 @@ class InterceptPanel(QWidget):
         self._work: bytes = b""
         self._applying = False
         # Set by the main window: on_filter(match_or_None, text) installs/clears a
-        # HOLD rule from the filter expression on the live engine.
+        # HOLD rule; on_promote(original, edited) turns an edit into a persistent
+        # transform applied to all matching traffic (and resends).
         self.on_filter = None
+        self.on_promote = None
+        self.on_queue_config = None    # called with (max_held, auto_release_s, overflow)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
@@ -64,6 +69,30 @@ class InterceptPanel(QWidget):
         fbar.addWidget(self.filter_edit, 1)
         fbar.addWidget(btn_apply)
         root.addLayout(fbar)
+
+        # --- volume safeguards: never drown the queue or stall the wire -----
+        vbar = QHBoxLayout()
+        vbar.addWidget(QLabel("Hold at most:"))
+        self.limit_spin = QSpinBox(); self.limit_spin.setRange(0, 100000)
+        self.limit_spin.setValue(20); self.limit_spin.setSpecialValueText("∞")
+        self.limit_spin.setToolTip("Max packets held at once (0 = unlimited). "
+                                   "Extra matches auto-resolve instead of piling up.")
+        self.limit_spin.valueChanged.connect(self._push_queue_config)
+        vbar.addWidget(self.limit_spin)
+        vbar.addWidget(QLabel("  Auto-release after:"))
+        self.autorel_spin = QSpinBox(); self.autorel_spin.setRange(0, 3600)
+        self.autorel_spin.setSuffix(" s"); self.autorel_spin.setValue(0)
+        self.autorel_spin.setSpecialValueText("off")
+        self.autorel_spin.setToolTip("A held packet not acted on in this many seconds "
+                                     "auto-resolves, so the wire never stalls (0 = off).")
+        self.autorel_spin.valueChanged.connect(self._push_queue_config)
+        vbar.addWidget(self.autorel_spin)
+        vbar.addWidget(QLabel("  On overflow:"))
+        self.overflow_combo = QComboBox(); self.overflow_combo.addItems(["forward", "drop"])
+        self.overflow_combo.currentTextChanged.connect(self._push_queue_config)
+        vbar.addWidget(self.overflow_combo)
+        vbar.addStretch(1)
+        root.addLayout(vbar)
 
         self.filter_status = QLabel("Intercept off — all traffic passes through.")
         self.filter_status.setStyleSheet("color: palette(mid);")
@@ -112,15 +141,20 @@ class InterceptPanel(QWidget):
 
         buttons = QHBoxLayout()
         self.btn_apply_hex = QPushButton("Apply hex")
+        self.btn_all = QPushButton("Apply to all")
+        self.btn_all.setToolTip("Turn this edit into a persistent transform applied to "
+                                "every matching packet, including resends")
         self.btn_fwd = QPushButton("Forward")
         self.btn_mod = QPushButton("Forward modified")
         self.btn_drop = QPushButton("Drop")
         self.btn_apply_hex.clicked.connect(self._apply_hex)
+        self.btn_all.clicked.connect(self._apply_to_all)
         self.btn_fwd.clicked.connect(lambda: self._resolve("forward"))
         self.btn_mod.clicked.connect(lambda: self._resolve("modify"))
         self.btn_drop.clicked.connect(lambda: self._resolve("drop"))
         buttons.addWidget(self.btn_apply_hex)
         buttons.addStretch(1)
+        buttons.addWidget(self.btn_all)
         buttons.addWidget(self.btn_fwd)
         buttons.addWidget(self.btn_mod)
         buttons.addWidget(self.btn_drop)
@@ -286,5 +320,31 @@ class InterceptPanel(QWidget):
         self.refresh_pending()
 
     def _set_buttons_enabled(self, on: bool) -> None:
-        for b in (self.btn_apply_hex, self.btn_fwd, self.btn_mod, self.btn_drop):
+        for b in (self.btn_apply_hex, self.btn_all, self.btn_fwd, self.btn_mod, self.btn_drop):
             b.setEnabled(on)
+
+    # ---- volume safeguards / promote ---------------------------------------
+    def queue_config(self) -> tuple[int, float, str]:
+        """(max_held, auto_release_s, overflow) for creating/updating the queue."""
+        return (self.limit_spin.value(), float(self.autorel_spin.value()),
+                self.overflow_combo.currentText())
+
+    def _push_queue_config(self) -> None:
+        if self.on_queue_config is not None:
+            self.on_queue_config(*self.queue_config())
+
+    def _apply_to_all(self) -> None:
+        """Promote the current edit to a persistent transform, then forward it."""
+        if self.queue is None or self._current_id is None or self.on_promote is None:
+            return
+        hp = self.queue.get(self._current_id)
+        if hp is None:
+            return
+        msg = self.on_promote(hp.data, self._work)      # derive + install transform
+        # forwarding the current edited packet is also part of "apply to all"
+        self._resolve("modify")
+        self.filter_status.setText(msg)
+        self.filter_status.setStyleSheet("color: #27ae60; font-weight: 600;")
+        # promoting turns off interactive holding for this filter; the transform
+        # now handles the rest of the stream automatically.
+        self.enable_check.setChecked(False)
