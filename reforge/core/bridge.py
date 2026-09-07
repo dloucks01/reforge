@@ -99,7 +99,7 @@ class UserspaceBridge:
         # flow_rewrite implies seq fix-ups, position-aware (R3)
         self.set_seq_fixup(seq_fixup or flow_rewrite, position_aware=flow_rewrite)
 
-        self._queue: "Queue[tuple[float, Frame]]" = Queue(maxsize=max_queue)
+        self._queue: Queue[tuple[float, Frame]] = Queue(maxsize=max_queue)
         self._thread: threading.Thread | None = None
         self._running = threading.Event()
         self._ready = threading.Event()
@@ -183,6 +183,19 @@ class UserspaceBridge:
             time.sleep(res.delay_s)
 
         out = res.out if res.out is not None else data
+        # Ordering: if an earlier packet of this flow is held for interception,
+        # this forward must queue behind it so it never overtakes the edited one.
+        if self.intercept is not None:
+            fk = self._flow_key(ingress, data)
+            if self.intercept.passthrough(ingress, out,
+                                          self._egress_release(ingress, send_peer, data), fk):
+                if res.modified:
+                    self.counters.modified += 1
+                for extra in res.extra:
+                    self.intercept.passthrough(ingress, extra,
+                                               self._inject_release(ingress, send_peer), fk) \
+                        or self._send_injected(ingress, send_peer, extra)
+                return
         send_peer(out)
         self._remember_sent(out)
         self.counters.forwarded += 1
@@ -190,15 +203,34 @@ class UserspaceBridge:
         if res.modified:
             self.counters.modified += 1
         for extra in res.extra:
-            send_peer(extra)
-            self._remember_sent(extra)
-            self.counters.injected += 1
-            self.counters.forwarded += 1
-            self._bump_dir(ingress, 1)
+            self._send_injected(ingress, send_peer, extra)
 
-    def _park(self, ingress: str, data: bytes, send_peer) -> None:
-        """Divert a held packet to the interception queue (non-blocking)."""
-        def release(out_bytes, *, _ingress=ingress, _send=send_peer, _orig=data):
+    def _flow_key(self, ingress: str, data: bytes):
+        """A per-direction flow identity for in-order interception release.
+
+        The two directions of a connection have swapped addresses/ports and arrive
+        on different ports, so each direction is ordered independently. Falls back
+        to L2 for non-IP frames. Returns a hashable key (never raises)."""
+        try:
+            from scapy.layers.inet import IP, TCP, UDP
+            from scapy.layers.inet6 import IPv6
+            from scapy.layers.l2 import Ether
+
+            eth = Ether(data)
+            ip = eth.getlayer(IP) or eth.getlayer(IPv6)
+            if ip is not None:
+                l4 = ip.getlayer(TCP) or ip.getlayer(UDP)
+                if l4 is not None:
+                    return (ingress, ip.src, int(l4.sport), ip.dst, int(l4.dport),
+                            l4.__class__.__name__)
+                return (ingress, ip.src, ip.dst, int(getattr(ip, "proto", getattr(ip, "nh", 0))))
+            return (ingress, eth.src, eth.dst, int(eth.type))
+        except Exception:
+            return (ingress, bytes(data[:14]))     # last resort: L2 header bytes
+
+    def _egress_release(self, ingress: str, send_peer, orig: bytes):
+        """Release closure for a forwarded/held packet: send + count."""
+        def release(out_bytes, *, _ingress=ingress, _send=send_peer, _orig=orig):
             if out_bytes is None:
                 self.counters.dropped += 1
                 return
@@ -208,8 +240,31 @@ class UserspaceBridge:
             self._bump_dir(_ingress, 1)
             if out_bytes != _orig:
                 self.counters.modified += 1
+        return release
 
-        self.intercept.hold(ingress, data, release)
+    def _inject_release(self, ingress: str, send_peer):
+        """Release closure for an injected/duplicated extra packet."""
+        def release(out_bytes, *, _ingress=ingress, _send=send_peer):
+            if out_bytes is None:
+                return
+            _send(out_bytes)
+            self._remember_sent(out_bytes)
+            self.counters.injected += 1
+            self.counters.forwarded += 1
+            self._bump_dir(_ingress, 1)
+        return release
+
+    def _send_injected(self, ingress: str, send_peer, extra: bytes) -> None:
+        send_peer(extra)
+        self._remember_sent(extra)
+        self.counters.injected += 1
+        self.counters.forwarded += 1
+        self._bump_dir(ingress, 1)
+
+    def _park(self, ingress: str, data: bytes, send_peer) -> None:
+        """Divert a held packet to the interception queue (non-blocking)."""
+        self.intercept.hold(ingress, data, self._egress_release(ingress, send_peer, data),
+                            flow_key=self._flow_key(ingress, data))
 
     def process_frame(self, ingress: str, data: bytes) -> list[bytes]:
         """Pure form for tests/headless: returns bytes to send on the peer port.

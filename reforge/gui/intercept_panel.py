@@ -12,9 +12,11 @@ import time
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
@@ -28,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from reforge.core.packet import Packet
 from reforge.dissect import scapy_tree
+from reforge.rules.filter import FilterError, parse_filter
 
 HELD_COLUMNS = ["ID", "Ingress", "Proto", "Info", "Age"]
 _LAYER_FIELD = Qt.UserRole + 1
@@ -40,13 +43,44 @@ class InterceptPanel(QWidget):
         self._current_id: int | None = None
         self._work: bytes = b""
         self._applying = False
+        # Set by the main window: on_filter(match_or_None, text) installs/clears a
+        # HOLD rule from the filter expression on the live engine.
+        self.on_filter = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
 
+        # --- intercept filter bar: which packets to catch -------------------
+        fbar = QHBoxLayout()
+        self.enable_check = QCheckBox("Intercept")
+        self.enable_check.setToolTip("Hold matching packets for edit; others pass through")
+        self.enable_check.toggled.connect(self._apply_filter)
+        self.filter_edit = QLineEdit()
+        self.filter_edit.setPlaceholderText(
+            'catch filter, e.g.  TCP.dport == 80 and Raw.load contains "login"')
+        self.filter_edit.returnPressed.connect(self._apply_filter)
+        btn_apply = QPushButton("Apply"); btn_apply.clicked.connect(self._apply_filter)
+        fbar.addWidget(self.enable_check)
+        fbar.addWidget(self.filter_edit, 1)
+        fbar.addWidget(btn_apply)
+        root.addLayout(fbar)
+
+        self.filter_status = QLabel("Intercept off — all traffic passes through.")
+        self.filter_status.setStyleSheet("color: palette(mid);")
+        root.addWidget(self.filter_status)
+
         self.header = QLabel("Interception queue — held: 0")
         self.header.setStyleSheet("font-weight: 700;")
         root.addWidget(self.header)
+
+        # --- search box over the held queue ---------------------------------
+        sbar = QHBoxLayout()
+        sbar.addWidget(QLabel("Search:"))
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("filter the held list (id / iface / proto / info)")
+        self.search_edit.textChanged.connect(self._apply_search)
+        sbar.addWidget(self.search_edit, 1)
+        root.addLayout(sbar)
 
         split = QSplitter(Qt.Vertical)
 
@@ -97,6 +131,44 @@ class InterceptPanel(QWidget):
         root.addWidget(split)
         self._set_buttons_enabled(False)
 
+    # ---- intercept filter / search -----------------------------------------
+    def _apply_filter(self) -> None:
+        """Compile the filter box and (via on_filter) install/clear a HOLD rule."""
+        enabled = self.enable_check.isChecked()
+        text = self.filter_edit.text().strip()
+        if not enabled:
+            if self.on_filter is not None:
+                self.on_filter(None, "")
+            self.filter_status.setText("Intercept off — all traffic passes through.")
+            self.filter_status.setStyleSheet("color: palette(mid);")
+            return
+        if not text:
+            match = None                       # empty + enabled = hold everything
+        else:
+            try:
+                match = parse_filter(text)
+            except FilterError as exc:
+                self.filter_status.setText(f"Filter error: {exc}")
+                self.filter_status.setStyleSheet("color: #c0392b; font-weight: 600;")
+                return
+        if self.on_filter is not None:
+            self.on_filter(match, text)
+        shown = text or "all packets"
+        self.filter_status.setText(f"Holding: {shown}")
+        self.filter_status.setStyleSheet("color: #27ae60; font-weight: 600;")
+
+    def _apply_search(self) -> None:
+        needle = self.search_edit.text().strip().lower()
+        for r in range(self.table.rowCount()):
+            if not needle:
+                self.table.setRowHidden(r, False)
+                continue
+            hay = " ".join(
+                (self.table.item(r, c).text() if self.table.item(r, c) else "")
+                for c in range(self.table.columnCount())
+            ).lower()
+            self.table.setRowHidden(r, needle not in hay)
+
     # ---- queue binding ------------------------------------------------------
     def set_queue(self, queue) -> None:
         self.queue = queue
@@ -138,6 +210,7 @@ class InterceptPanel(QWidget):
                 if self.table.item(r, 0).data(Qt.UserRole) == selected:
                     self.table.selectRow(r)
                     break
+        self._apply_search()                    # keep the active search applied
 
     # ---- detail / editing ---------------------------------------------------
     def _on_select(self) -> None:

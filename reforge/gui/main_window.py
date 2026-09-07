@@ -36,8 +36,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from reforge.capture.afpacket import AfPacketBackend
+from reforge.capture.base import Frame
+from reforge.capture.pcap import PcapFileBackend, export_pcap
+from reforge.capture.registry import list_interfaces
+from reforge.constants import APP_NAME, TAGLINE, VERSION
+from reforge.core.capture_service import CaptureService
 from reforge.core.intercept import InterceptQueue
 from reforge.core.packet import Packet
+from reforge.dissect import scapy_tree
 from reforge.gui import theme
 from reforge.gui.attacks_panel import AttacksPanel
 from reforge.gui.builder_panel import BuilderPanel
@@ -50,14 +57,6 @@ from reforge.gui.recon_panel import ReconPanel
 from reforge.gui.rules_panel import RulesPanel
 from reforge.gui.scan_panel import ScanPanel
 from reforge.gui.scenario_panel import ScenarioPanel
-
-from reforge.capture.afpacket import AfPacketBackend
-from reforge.capture.base import Frame
-from reforge.capture.pcap import PcapFileBackend, export_pcap
-from reforge.capture.registry import list_interfaces
-from reforge.constants import APP_NAME, TAGLINE, VERSION
-from reforge.core.capture_service import CaptureService
-from reforge.dissect import scapy_tree
 
 log = logging.getLogger("reforge.gui")
 
@@ -72,6 +71,8 @@ class MainWindow(QMainWindow):
 
         self.service: CaptureService | None = None
         self.intercept: InterceptQueue | None = None
+        self.engine = None                 # live engine while a bridge runs
+        self._intercept_filter: tuple | None = None  # (match, text) to hold
         self.packets: list[tuple[float, Frame]] = []  # captured (ts, frame)
         self._t0: float | None = None
 
@@ -287,6 +288,7 @@ class MainWindow(QMainWindow):
 
         intercept_dock = QDockWidget("Intercept", self)
         self.intercept_panel = InterceptPanel()
+        self.intercept_panel.on_filter = self._on_intercept_filter
         intercept_dock.setWidget(self.intercept_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, intercept_dock)
         self.tabifyDockWidget(rules_dock, intercept_dock)
@@ -337,6 +339,8 @@ class MainWindow(QMainWindow):
         from reforge.core.bridge import UserspaceBridge
 
         engine = self.rules_panel.build_engine(dry_run=False)
+        self.engine = engine
+        self._install_intercept_filter(engine)
         self.intercept = InterceptQueue()
         self.intercept_panel.set_queue(self.intercept)
         armed = self.act_arm.isChecked()
@@ -370,12 +374,44 @@ class MainWindow(QMainWindow):
         self.act_stop.setEnabled(True)
         self.statusBar().showMessage(f"Running — {label}")
 
+    # ---- interactive intercept filter --------------------------------------
+    _INTERCEPT_RULE = "__intercept_filter__"
+
+    def _on_intercept_filter(self, match, text: str) -> None:
+        """Called by the Intercept panel: install/clear a HOLD rule from a filter."""
+        if match is None:
+            self._intercept_filter = None
+        else:
+            self._intercept_filter = (match, text)
+        if self.engine is not None:
+            self._install_intercept_filter(self.engine)
+            n = self.intercept.count() if self.intercept else 0
+            state = f"intercept: {text or 'all packets'}" if match is not None else "intercept off"
+            self.statusBar().showMessage(f"{state} (held: {n})")
+        elif match is not None:
+            self.statusBar().showMessage("Intercept filter armed — starts with the bridge")
+
+    def _install_intercept_filter(self, engine) -> None:
+        """Rebuild the engine rule list with the intercept HOLD rule at the front.
+
+        A new list is assigned atomically, so the bridge worker thread iterating
+        the old list is never disturbed mid-evaluation."""
+        from reforge.rules.actions import Hold
+        from reforge.rules.base import Rule
+
+        rules = [r for r in engine.rules if r.name != self._INTERCEPT_RULE]
+        if self._intercept_filter is not None:
+            match, _text = self._intercept_filter
+            rules.insert(0, Rule(self._INTERCEPT_RULE, match, [Hold()]))
+        engine.rules = rules
+
     def stop_capture(self) -> None:
         self.timer.stop()
         if self.intercept is not None:
             self.intercept.release_all("forward")  # never strand held packets
             self.intercept_panel.set_queue(None)
             self.intercept = None
+        self.engine = None
         if self.service:
             self._flush_rows()  # flush remaining (no auto-stop re-entry)
             self.service.stop()
@@ -653,7 +689,7 @@ class MainWindow(QMainWindow):
                 if item is not None:
                     item.setForeground(brush)
 
-    def closeEvent(self, event) -> None:  # noqa: N802 (Qt signature)
+    def closeEvent(self, event) -> None:
         self.stop_capture()
         for cleanup in (self.attacks_panel.stop_all, self.console_panel.stop):
             try:
