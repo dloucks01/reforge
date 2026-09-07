@@ -41,6 +41,7 @@ from reforge.core.packet import Packet
 from reforge.gui import theme
 from reforge.gui.attacks_panel import AttacksPanel
 from reforge.gui.builder_panel import BuilderPanel
+from reforge.gui.console_panel import ConsolePanel
 from reforge.gui.creds_panel import CredsPanel
 from reforge.gui.diagnostics_panel import DiagnosticsPanel
 from reforge.gui.fuzzing_panel import FuzzingPanel
@@ -48,6 +49,7 @@ from reforge.gui.intercept_panel import InterceptPanel
 from reforge.gui.recon_panel import ReconPanel
 from reforge.gui.rules_panel import RulesPanel
 from reforge.gui.scan_panel import ScanPanel
+from reforge.gui.scenario_panel import ScenarioPanel
 
 from reforge.capture.afpacket import AfPacketBackend
 from reforge.capture.base import Frame
@@ -176,6 +178,11 @@ class MainWindow(QMainWindow):
         act_plugins.triggered.connect(self.load_plugins)
         tb.addAction(act_plugins)
 
+        act_vault = QAction("Vault", self)
+        act_vault.setToolTip("Encrypt/decrypt an engagement artifact at rest")
+        act_vault.triggered.connect(self.vault_tool)
+        tb.addAction(act_vault)
+
         # push the theme toggle to the far right
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -247,6 +254,10 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.attacks_panel, "Attacks")
         self.scan_panel = ScanPanel(get_inventory=lambda: self.recon_panel.inv)
         self.tabs.addTab(self.scan_panel, "Scan")
+        self.scenario_panel = ScenarioPanel()
+        self.tabs.addTab(self.scenario_panel, "Scenario")
+        self.console_panel = ConsolePanel()
+        self.tabs.addTab(self.console_panel, "Console")
         self.setCentralWidget(self.tabs)
 
     def _bridge_ifaces(self) -> list[str]:
@@ -555,6 +566,31 @@ class MainWindow(QMainWindow):
                 if item is not None:
                     item.setBackground(bg)
 
+    def vault_tool(self) -> None:
+        from PySide6.QtWidgets import QInputDialog, QLineEdit
+
+        mode, ok = QInputDialog.getItem(self, "Vault", "Operation:",
+                                        ["encrypt", "decrypt"], 0, False)
+        if not ok:
+            return
+        src, _ = QFileDialog.getOpenFileName(self, f"{mode}: source file")
+        if not src:
+            return
+        dst, _ = QFileDialog.getSaveFileName(self, f"{mode}: output file")
+        if not dst:
+            return
+        pw, ok = QInputDialog.getText(self, "Vault", "Passphrase:", QLineEdit.Password)
+        if not ok or not pw:
+            return
+        from reforge.core.vault import decrypt_file, encrypt_file
+
+        try:
+            fn = encrypt_file if mode == "encrypt" else decrypt_file
+            fn(src, dst, pw)
+            self.statusBar().showMessage(f"{mode}ed {src} -> {dst}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Vault error", str(exc))
+
     def load_plugins(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "Select plugins directory")
         if not directory:
@@ -619,10 +655,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt signature)
         self.stop_capture()
-        try:
-            self.attacks_panel.stop_all()
-        except Exception:
-            pass
+        for cleanup in (self.attacks_panel.stop_all, self.console_panel.stop):
+            try:
+                cleanup()
+            except Exception:
+                pass
         super().closeEvent(event)
 
 
