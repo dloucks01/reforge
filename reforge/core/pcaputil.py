@@ -27,6 +27,28 @@ def read_frames(path: str | Path) -> list[bytes]:
     return frames
 
 
+def read_timed_frames(path: str | Path) -> list[tuple[float, bytes]]:
+    """Like read_frames, but pairs each frame with its pcap capture timestamp.
+
+    Preserves the original inter-packet timing when replaying a pcap, so the UI's
+    time column and any timing analysis reflect the capture, not the replay."""
+    from reforge.core.scapy_init import warmup
+    warmup()
+    from scapy.layers.l2 import Ether  # noqa: F401 — ensures DLT1 (Ethernet) is registered
+    from scapy.utils import rdpcap
+
+    out: list[tuple[float, bytes]] = []
+    for pkt in rdpcap(str(path)):
+        original = getattr(pkt, "original", None)
+        data = bytes(original) if original else bytes(pkt)
+        try:
+            ts = float(pkt.time)
+        except (TypeError, ValueError):
+            ts = 0.0
+        out.append((ts, data))
+    return out
+
+
 def read_packets(path: str | Path) -> list:
     """Return each packet re-dissected from Ethernet (consistent layering)."""
     from scapy.layers.l2 import Ether

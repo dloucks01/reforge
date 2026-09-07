@@ -7,8 +7,8 @@ root — the backbone of the Phase 1 test story.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from reforge.capture.base import BackendCaps, CaptureBackend, Frame
 
@@ -38,13 +38,14 @@ class PcapFileBackend(CaptureBackend):
         return True, "reads pcap/pcapng offline"
 
     def open(self) -> None:
-        from reforge.core.pcaputil import read_frames
+        from reforge.core.pcaputil import read_timed_frames
 
         # Use the exact captured bytes (not a recomputed serialization) so replay
-        # matches the wire and dissection is consistent.
+        # matches the wire, and carry each packet's original capture timestamp so
+        # the UI shows the real inter-packet timing, not the replay time.
         self._frames = [
-            Frame(data=fb, ingress=self.iface_label, meta={})
-            for fb in read_frames(self.path)
+            Frame(data=fb, ingress=self.iface_label, meta={"ts": ts})
+            for ts, fb in read_timed_frames(self.path)
         ]
         self._pos = 0
 
@@ -67,10 +68,19 @@ class PcapFileBackend(CaptureBackend):
 
 
 def export_pcap(path: str | Path, frames: Iterable[Frame]) -> int:
-    """Write frames to a pcap file. Returns count written."""
+    """Write frames to a pcap file, preserving capture timestamps. Returns count."""
     from scapy.layers.l2 import Ether
     from scapy.utils import wrpcap
 
-    packets = [Ether(f.data) for f in frames]
+    packets = []
+    for f in frames:
+        pkt = Ether(f.data)
+        ts = f.meta.get("ts") if isinstance(f.meta, dict) else None
+        if ts is not None:
+            try:
+                pkt.time = float(ts)
+            except (TypeError, ValueError):
+                pass
+        packets.append(pkt)
     wrpcap(str(path), packets)
     return len(packets)

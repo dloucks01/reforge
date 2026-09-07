@@ -45,3 +45,21 @@ def test_recv_burst_paginates(tmp_path):
     assert (len(first), len(second), len(third)) == (4, 4, 2)
     assert backend.exhausted
     backend.close()
+
+
+def test_pcap_timestamps_preserved(tmp_path):
+    # frames carrying explicit capture timestamps survive export -> import,
+    # so replayed pcaps show real inter-packet timing (not the replay clock).
+    frames = [
+        Frame(data=bytes(Ether() / IP(dst=f"10.0.0.{i}") / UDP(dport=1000 + i)),
+              meta={"ts": 1000.0 + i * 100})
+        for i in range(3)
+    ]
+    path = tmp_path / "timed.pcap"
+    export_pcap(path, frames)
+
+    backend = PcapFileBackend(path)
+    backend.open()
+    got = backend.recv_burst(max_frames=10)
+    assert [f.meta["ts"] for f in got] == [1000.0, 1100.0, 1200.0]
+    backend.close()
