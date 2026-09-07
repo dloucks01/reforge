@@ -46,6 +46,29 @@ def test_two_sensors_merge_into_collector():
     assert c.sensors == {"edge-1", "edge-2"}
 
 
+def test_collector_ingest_is_threadsafe():
+    import threading
+
+    c = Collector()
+    same = {"kind": "http-basic", "username": "admin", "secret": "x",
+            "src": "10.0.0.5", "dst": "10.0.0.9", "proto": "HTTP"}
+
+    def worker(n):
+        for i in range(50):
+            c.ingest(Message(f"s{n}", "cred", same))                 # duplicate cred
+            c.ingest(Message(f"s{n}", "host", {"ip": f"10.0.{n}.{i}"}))  # unique host
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    rep = c.report()
+    assert len(rep.credentials) == 1                    # deduped despite the race
+    assert len(rep.hosts) == 8 * 50                      # no lost/duplicate hosts
+
+
 def test_cred_dedup_across_sensors():
     c = Collector()
     same = {"kind": "http-basic", "username": "admin", "secret": "x",

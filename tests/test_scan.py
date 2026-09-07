@@ -23,6 +23,11 @@ def test_parse_ports():
     assert parse_ports("22,80,443,8000-8002") == [22, 80, 443, 8000, 8001, 8002]
 
 
+def test_expand_targets_edge_masks():
+    assert expand_targets("10.0.0.5/32") == ["10.0.0.5"]              # single host
+    assert expand_targets("10.0.0.4/31") == ["10.0.0.4", "10.0.0.5"]  # point-to-point
+
+
 # ---- SYN classification ----------------------------------------------------
 def test_classify_open_closed_filtered():
     assert tcp.classify(IP() / TCP(flags="SA")) == tcp.OPEN

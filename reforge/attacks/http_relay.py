@@ -46,7 +46,9 @@ def _pump(src, dst, from_client: bool, transforms: list[Callable]) -> None:
             if not data:
                 rest = framer.flush()
                 if rest:
-                    dst.sendall(rest)
+                    # a body-delimited-by-close response is now complete: transform it
+                    dst.sendall(apply_transforms(rest, from_client, transforms)
+                                if mode == "http" and looks_http(rest) else rest)
                 break
             if mode is None:
                 mode = "http" if looks_http(data) else "raw"

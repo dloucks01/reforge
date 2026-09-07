@@ -75,6 +75,40 @@ def test_framer_chunked():
     assert len(got) == 1 and got[0] == msg
 
 
+def test_framer_response_body_delimited_by_close():
+    f = HttpFramer()
+    # HTTP/1.0-style response: no Content-Length, no chunked -> body until close
+    assert f.feed(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n<html>") == []
+    assert f.feed(b"<body>page</body></html>") == []          # still buffering
+    msg = f.flush()                                            # connection closed
+    assert msg.endswith(b"\r\n\r\n<html><body>page</body></html>")
+
+
+def test_framer_request_without_length_has_no_body():
+    f = HttpFramer()
+    got = f.feed(b"GET /x HTTP/1.1\r\nHost: t\r\n\r\n")
+    assert len(got) == 1 and got[0].endswith(b"\r\n\r\n")      # emitted, no body waited on
+
+
+def test_framer_chunked_with_extension_and_trailers():
+    f = HttpFramer()
+    msg = (b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+           b"5;name=v\r\nHELLO\r\n0\r\nX-Trailer: v\r\n\r\n")   # chunk ext + trailer
+    got = f.feed(msg)
+    assert len(got) == 1 and got[0] == msg
+
+
+def test_reassembler_overlapping_out_of_order():
+    from reforge.core.tcpreasm import DirectionBuffer
+
+    b = DirectionBuffer()
+    assert b.add(1000, b"AAAA") == b"AAAA"        # 1000-1003
+    assert b.add(1006, b"CCCC") == b""            # buffered (gap at 1004-1005)
+    # overlaps the tail of the first seg and fills the gap up to the buffered seg
+    assert b.add(1002, b"AABB") == b"BBCCCC"
+    assert b.next == 1010
+
+
 def test_framer_pipelined_requests():
     f = HttpFramer()
     stream = (b"GET /a HTTP/1.1\r\nHost: x\r\n\r\n"

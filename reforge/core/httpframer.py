@@ -33,8 +33,15 @@ def _chunked_end(buf: bytes, start: int) -> int | None:
             return None
         data_start = nl + 2
         if size == 0:
-            end = buf.find(b"\r\n", data_start)   # trailer terminator
-            return end + 2 if end != -1 else None
+            # last chunk: skip any trailer headers until the terminating blank line
+            j = data_start
+            while True:
+                nl2 = buf.find(b"\r\n", j)
+                if nl2 == -1:
+                    return None
+                if nl2 == j:                       # empty line -> end of message
+                    return nl2 + 2
+                j = nl2 + 2
         i = data_start + size + 2                  # skip data + CRLF
     return None
 
@@ -78,10 +85,13 @@ class HttpFramer:
             if len(self.buf) < need:
                 return None
             msg_end = need
+        elif is_response:
+            # A response with no Content-Length/chunked is delimited by connection
+            # close: keep buffering the whole thing (headers + body) and emit it as
+            # one message on flush(), so transforms see the full body.
+            return None
         else:
-            # No framing info: requests and bodiless responses end at the header
-            # block. (Response bodies delimited only by connection close need the
-            # FIN — flushed by flush() on teardown.)
+            # A request with no Content-Length/chunked has no body.
             msg_end = body_start
 
         msg = bytes(self.buf[:msg_end])

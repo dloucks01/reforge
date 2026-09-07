@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from reforge.distributed.protocol import Message
 from reforge.recon.assets import AssetInventory
 from reforge.scenario.report import Report
@@ -14,18 +16,20 @@ class Collector:
         self.events: list[dict] = []
         self.sensors: set[str] = set()
         self._seen_creds: set = set()
+        self._lock = threading.Lock()      # multiple sensor threads ingest concurrently
 
     def ingest(self, msg: Message) -> None:
-        self.sensors.add(msg.sensor)
-        if msg.kind == "host":
-            self._merge_host(msg.data)
-        elif msg.kind == "cred":
-            self._merge_cred(msg.data)
-        elif msg.kind == "event":
-            self.events.append({"sensor": msg.sensor, **msg.data})
-        elif msg.kind == "scan":
-            self._merge_host({"ip": msg.data["ip"],
-                              "services": {int(p): "open" for p in msg.data.get("open", [])}})
+        with self._lock:
+            self.sensors.add(msg.sensor)
+            if msg.kind == "host":
+                self._merge_host(msg.data)
+            elif msg.kind == "cred":
+                self._merge_cred(msg.data)
+            elif msg.kind == "event":
+                self.events.append({"sensor": msg.sensor, **msg.data})
+            elif msg.kind == "scan":
+                self._merge_host({"ip": msg.data["ip"],
+                                  "services": {int(p): "open" for p in msg.data.get("open", [])}})
 
     def ingest_line(self, line: bytes | str) -> None:
         self.ingest(Message.decode(line))
@@ -47,9 +51,12 @@ class Collector:
             self.creds.append(d)
 
     def report(self, name: str = "distributed-collection") -> Report:
-        hosts = [{"ip": h.ip, "mac": h.mac, "os_family": h.os_family,
-                  "services": dict(h.services), "hostnames": sorted(h.hostnames)}
-                 for h in self.inventory.list_hosts()]
-        return Report(name=name, hosts=hosts, credentials=list(self.creds),
-                      events=list(self.events),
-                      notes=[f"sensors: {', '.join(sorted(self.sensors))}"])
+        with self._lock:                          # consistent snapshot vs. concurrent ingest
+            hosts = [{"ip": h.ip, "mac": h.mac, "os_family": h.os_family,
+                      "services": dict(h.services), "hostnames": sorted(h.hostnames)}
+                     for h in self.inventory.list_hosts()]
+            creds = list(self.creds)
+            events = list(self.events)
+            sensors = sorted(self.sensors)
+        return Report(name=name, hosts=hosts, credentials=creds, events=events,
+                      notes=[f"sensors: {', '.join(sensors)}"])
