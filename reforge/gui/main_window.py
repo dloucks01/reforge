@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QSplitter,
-    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -264,10 +263,12 @@ class MainWindow(QMainWindow):
             "automate": self._ws("automate", self._ws_automate()),
             "system": self._ws("system", self._ws_system()),
         }
-        self.stack = QStackedWidget()
-        self._ws_index = {}
-        for key, w in self._workspaces.items():
-            self._ws_index[key] = self.stack.addWidget(w)
+        from reforge.gui.navrail import SECTIONS as _RAIL
+        from reforge.gui.panes import PaneArea
+
+        titles = dict(_RAIL)
+        self.pane_area = PaneArea(self._workspaces, titles)
+        self.pane_area.active_changed.connect(self.nav_reflect)
 
         self.nav = NavRail()
         self.nav.switched.connect(self._go_workspace)
@@ -277,7 +278,7 @@ class MainWindow(QMainWindow):
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(0)
         bl.addWidget(self.nav)
-        bl.addWidget(self.stack, 1)
+        bl.addWidget(self.pane_area, 1)
 
         central = QWidget()
         cl = QVBoxLayout(central)
@@ -401,10 +402,10 @@ class MainWindow(QMainWindow):
         return t
 
     def _go_workspace(self, key) -> None:
-        idx = self._ws_index.get(key)
-        if idx is not None:
-            self.stack.setCurrentIndex(idx)
-            self.nav.set_active(key)
+        self.pane_area.set_active_workspace(key)
+
+    def nav_reflect(self, key) -> None:
+        self.nav.set_active(key)
     def _open_guide(self, section_key: str = "") -> None:
         """Switch to the System workspace, its Guide tab, and scroll to a section."""
         self._go_workspace("system")

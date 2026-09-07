@@ -262,6 +262,12 @@ QTabWidget::pane {{ border: 1px solid {p['BORDER']}; border-radius: 6px; top: -1
 #wsBlurb {{ color: {p['TEXT_MUTED']}; font-size: 11px; }}
 #wsHelp {{ padding: 1px 7px; color: {p['ACCENT']}; font-weight: 700; border: 1px solid {p['BORDER']}; border-radius: 5px; }}
 #wsHelp:hover {{ border-color: {p['ACCENT']}; }}
+
+#wsPane {{ border: none; }}
+#paneHead {{ background: {p['BG_PANEL']}; border-bottom: 1px solid {p['BORDER']}; }}
+#paneTitle {{ color: {p['TEXT']}; font-weight: 700; font-size: 11.5px; }}
+#paneBtn {{ background: transparent; border: none; color: {p['TEXT_MUTED']}; padding: 1px 6px; font-size: 13px; }}
+#paneBtn:hover {{ background: {p['BG_ELEV2']}; color: {p['TEXT']}; border-radius: 4px; }}
 """
 
 

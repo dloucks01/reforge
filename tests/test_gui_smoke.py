@@ -166,7 +166,7 @@ def test_open_guide_navigates_and_scrolls(app):
     win = MainWindow()
     win._open_guide("intercept")
     # lands on the System workspace with the Guide tab selected
-    assert win.stack.currentIndex() == win._ws_index["system"]
+    assert win.pane_area.current_key() == "system"
     win.guide_panel.scroll_to("_filter")            # must not raise
 
 
@@ -176,7 +176,7 @@ def test_nav_switches_workspaces(app):
     win = MainWindow()
     for key in ("recon", "craft", "attack", "automate", "system", "live"):
         win._go_workspace(key)
-        assert win.stack.currentIndex() == win._ws_index[key]
+        assert win.pane_area.current_key() == key
 
 
 def test_intercept_presets_fill_filter(app):
@@ -365,3 +365,28 @@ def test_gui_demo_capture_starts(app):
     assert w.service.running
     w.stop_capture()
     assert w.service is None
+
+
+def test_pane_split_and_detach(app):
+    from reforge.gui.main_window import MainWindow
+
+    win = MainWindow()
+    pa = win.pane_area
+    assert len(pa.panes) == 1 and pa.current_key() == "live"
+
+    pa.split()                                   # two panes, distinct workspaces
+    assert len(pa.panes) == 2
+    assert len({p.key for p in pa.panes}) == 2
+
+    key = pa.panes[1].key
+    pa.detach(key)                               # pop pane 2's workspace to a window
+    assert key in pa._detached
+    assert key not in {p.key for p in pa.panes}  # no longer in a pane
+
+    pa._detached[key].close()                    # closing returns it to the park
+    app.processEvents()
+    assert key not in pa._detached
+    win._go_workspace(key)                       # and the nav can re-show it
+
+    pa.close_pane(pa.panes[1])
+    assert len(pa.panes) == 1
