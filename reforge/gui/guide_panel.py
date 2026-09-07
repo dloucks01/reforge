@@ -53,7 +53,8 @@ class GuidePanel(QWidget):
         title.setStyleSheet("font-size:19px;font-weight:800;")
         self.col.addWidget(title)
         intro = QLabel("Pick a section on the left, or read straight through. Every tab also "
-                       "has a one-line intro with its first steps.")
+                       "has a one-line intro with its first steps.  "
+                       "Shortcuts: F1 Guide · F5 Start · Shift+F5 Stop.")
         intro.setWordWrap(True); intro.setStyleSheet("color:palette(mid);")
         self.col.addWidget(intro)
         self.col.addSpacing(8)

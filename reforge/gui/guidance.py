@@ -185,6 +185,16 @@ FILTER_HELP = {
 }
 
 
+def bpf_help_tooltip() -> str:
+    ex = ["tcp port 80", "host 10.0.0.5", "net 10.0.0.0/24", "udp port 53",
+          "arp or icmp", "tcp and not port 22"]
+    body = "<br>".join(f"&nbsp;&nbsp;<code>{x}</code>" for x in ex)
+    return ("<b>Capture filter (BPF / tcpdump syntax)</b><br>"
+            "Applied in the kernel at capture time to limit what is captured.<br><br>"
+            f"{body}<br><br><i>Different from the Intercept filter, which selects packets "
+            "to hold and edit once captured.</i>")
+
+
 def filter_help_tooltip() -> str:
     e = "<br>".join(f"&nbsp;&nbsp;<code>{x}</code>" for x in FILTER_HELP["examples"])
     return (f"<b>{FILTER_HELP['title']}</b><br>{FILTER_HELP['grammar']}<br>"

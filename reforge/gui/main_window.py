@@ -164,13 +164,19 @@ class MainWindow(QMainWindow):
         self.bpf_edit = QLineEdit()
         self.bpf_edit.setPlaceholderText("e.g. tcp port 80 (optional)")
         self.bpf_edit.setMaximumWidth(240)
+        from reforge.gui.guidance import bpf_help_tooltip
+        self.bpf_edit.setToolTip(bpf_help_tooltip())
         tb.addWidget(self.bpf_edit)
 
         self.act_start = QAction("Start", self)
+        self.act_start.setShortcut("F5")
+        self.act_start.setToolTip("Start capture or bridge (F5)")
         self.act_start.triggered.connect(self.on_start)
         tb.addAction(self.act_start)
 
         self.act_stop = QAction("Stop", self)
+        self.act_stop.setShortcut("Shift+F5")
+        self.act_stop.setToolTip("Stop the running service (Shift+F5)")
         self.act_stop.triggered.connect(self.stop_capture)
         self.act_stop.setEnabled(False)
         tb.addAction(self.act_stop)
@@ -212,7 +218,8 @@ class MainWindow(QMainWindow):
 
         tb.addSeparator()
         act_guide = QAction("Guide", self)
-        act_guide.setToolTip("What each section does and how to start")
+        act_guide.setShortcut("F1")
+        act_guide.setToolTip("What each section does and how to start (F1)")
         act_guide.triggered.connect(lambda: self._open_guide(""))
         tb.addAction(act_guide)
 
