@@ -85,6 +85,18 @@ def s_analyze_pcap(ctx: ScenarioContext, p: dict) -> None:
     ctx.event("analyze_pcap", f"{p['file']} ({n} pkts, {len(seen)} creds)")
 
 
+@step("detect_covert", attack="T1048")
+def s_detect_covert(ctx: ScenarioContext, p: dict) -> None:
+    from scapy.utils import rdpcap
+
+    from reforge.covert.detect import detect
+
+    findings = detect(list(rdpcap(p["file"])))
+    for f in findings:
+        ctx.notes.append(f"covert: {f.channel} — {f.detail} ({f.confidence})")
+    ctx.event("detect_covert", f"{len(findings)} finding(s)")
+
+
 @step("scan", attack="T1046")
 def s_scan(ctx: ScenarioContext, p: dict) -> None:
     if ctx.dry_run:
