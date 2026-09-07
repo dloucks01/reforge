@@ -59,6 +59,10 @@ def build_action(spec: dict):
         return Fuzz(spec.get("mutations", 1), spec.get("seed"))
     if t == "plugin":
         return A.Plugin(spec["name"])
+    if t == "strip_starttls":
+        from reforge.attacks.starttls import StripStartTLS
+
+        return StripStartTLS()
     if t.startswith("http_"):
         from reforge.attacks import http_actions as H
 

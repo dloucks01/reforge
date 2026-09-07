@@ -44,7 +44,7 @@ This is a strong **inline manipulation core**. The gaps below are mostly
 
 ### Tier 2 — force multipliers
 
-5. **TLS interception** (cert-injection MITM): dynamic CA, SNI/ALPN handling,
+5. **TLS interception** — DELIVERED (attacks/tls_ca.py, tls_sni.py, tls_proxy.py, starttls.py): dynamic CA, SNI parsing,
    STARTTLS downgrade, per-host bypass — unlocks HTTPS manipulation end-to-end.
 6. **IDS/IPS evasion toolkit** (for testing defenses): IP/TCP fragmentation and
    overlap, TTL/segmentation tricks, packet-in-packet, timing/obfuscation.

@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -31,6 +33,8 @@ class AttacksPanel(QWidget):
         self._arp = None
         self._dns = None
         self._name = None
+        self._tls = None
+        self._ca = None
 
         root = QVBoxLayout(self)
         note = QLabel("Active on-path attacks — authorized engagements only. Needs root.")
@@ -39,6 +43,7 @@ class AttacksPanel(QWidget):
         root.addWidget(self._arp_box())
         root.addWidget(self._dns_box())
         root.addWidget(self._name_box())
+        root.addWidget(self._tls_box())
         root.addStretch(1)
 
     # ---- ARP ----------------------------------------------------------------
@@ -164,5 +169,59 @@ class AttacksPanel(QWidget):
             self._name = None
             self.name_status.setText("stopped")
 
+    # ---- TLS interception ---------------------------------------------------
+    def _tls_box(self) -> QGroupBox:
+        box = QGroupBox("TLS interception (certificate-injection MITM)")
+        v = QVBoxLayout(box)
+        row = QHBoxLayout()
+        self.tls_port = QSpinBox(); self.tls_port.setRange(1, 65535); self.tls_port.setValue(8443)
+        b_start = QPushButton("Start"); b_start.clicked.connect(self._tls_start)
+        b_stop = QPushButton("Stop"); b_stop.clicked.connect(self._tls_stop)
+        b_ca = QPushButton("Export CA cert"); b_ca.clicked.connect(self._tls_export_ca)
+        for w in (QLabel("Listen port:"), self.tls_port, b_start, b_stop, b_ca):
+            row.addWidget(w)
+        row.addStretch(1)
+        v.addLayout(row)
+        self.tls_status = QLabel("idle — redirect victim 443→listen port and install the CA")
+        v.addWidget(self.tls_status)
+        return box
+
+    def _ensure_ca(self):
+        from reforge.attacks.tls_ca import DynamicCA
+
+        if self._ca is None:
+            self._ca = DynamicCA()
+        return self._ca
+
+    def _tls_start(self):
+        from reforge.attacks.tls_proxy import TlsInterceptor
+
+        self._tls_stop()
+        ca = self._ensure_ca()
+        self._tls = TlsInterceptor(ca, listen=("0.0.0.0", self.tls_port.value()))
+        try:
+            port = self._tls.start()
+            self.tls_status.setText(f"intercepting on :{port} — export + install the CA, "
+                                    f"redirect 443→{port}")
+        except Exception as exc:
+            self.tls_status.setText(f"error: {exc}")
+
+    def _tls_stop(self):
+        if self._tls:
+            try:
+                self._tls.stop()
+            except Exception:
+                pass
+            self._tls = None
+            self.tls_status.setText("stopped")
+
+    def _tls_export_ca(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export CA certificate",
+                                              "reforge-ca.pem", "PEM (*.pem *.crt)")
+        if not path:
+            return
+        self._ensure_ca().write_ca(path)
+        self.tls_status.setText(f"CA written to {path} — install it on the victim as trusted root")
+
     def stop_all(self):
-        self._arp_stop(); self._dns_stop(); self._name_stop()
+        self._arp_stop(); self._dns_stop(); self._name_stop(); self._tls_stop()

@@ -33,8 +33,9 @@ from reforge.rules import spec as S
 RULE_COLUMNS = ["On", "Name", "Match", "Actions", "Hits"]
 OPS = ["eq", "ne", "lt", "le", "gt", "ge", "in", "contains", "cidr"]
 ACTION_TYPES = ["drop", "set_field", "delay", "payload_replace", "duplicate", "hold",
-                "fuzz", "http_sslstrip", "http_strip_encoding", "http_inject",
-                "http_replace_body", "http_strip_cookie", "http_remove_sec_headers"]
+                "fuzz", "strip_starttls", "http_sslstrip", "http_strip_encoding",
+                "http_inject", "http_replace_body", "http_strip_cookie",
+                "http_remove_sec_headers"]
 
 
 def _coerce(value: str):
