@@ -31,3 +31,24 @@ def test_save_and_load_roundtrip(tmp_path, monkeypatch):
 def test_load_mode_default_when_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(theme, "_SETTINGS", tmp_path / "does-not-exist.json")
     assert theme.load_mode("dark") == "dark"
+
+
+def test_qss_renders_for_both_palettes():
+    dark = theme.qss(theme.DARK)
+    light = theme.qss(theme.LIGHT)
+    assert isinstance(dark, str) and "QWidget" in dark and len(dark) > 500
+    assert isinstance(light, str) and dark != light        # palettes differ
+
+
+def test_current_mode_is_known():
+    assert theme.current_mode() in ("dark", "light")
+
+
+def test_apply_theme_sets_stylesheet(tmp_path, monkeypatch):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    mode = theme.apply_theme(app, "dark")
+    assert mode == "dark" and app.styleSheet()
+    assert theme.current_mode() == "dark"
