@@ -916,3 +916,71 @@ def test_gui_interactive_intercept_holds_and_releases_via_panel():
                 mitm.stop()
             if server is not None:
                 server.terminate(); server.wait(timeout=3)
+
+
+def test_gui_bridge_mode_rewrites_a_real_flow():
+    """Drive the GUI's Bridge-mode wiring end to end: MainWindow.start_bridge
+    builds the engine + intercept, starts a UserspaceBridge on two interfaces via
+    _start_service, and the drain loop fills the capture table. A real TCP flow
+    through it is rewritten inline and the capture table shows the frames."""
+    import tempfile
+
+    from PySide6.QtWidgets import QApplication
+
+    from reforge.testlab.netlab import BridgeFlowLab
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+    docroot = tempfile.mkdtemp(prefix="rf-guibr-")
+    with open(os.path.join(docroot, "page.html"), "w") as fh:
+        fh.write("BANNER=ORIGINAL-TOKEN\n")     # same length as the replacement
+
+    server = win = None
+    with BridgeFlowLab() as lab:
+        try:
+            server = subprocess.Popen(
+                ["ip", "netns", "exec", lab["server_ns"], "python3", "-m", "http.server",
+                 "8000", "--bind", lab["server_ip"]],
+                cwd=docroot, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.0)
+
+            from reforge.gui.main_window import MainWindow
+            win = MainWindow()
+            win.rules_panel.specs.append({
+                "name": "inject", "enabled": True, "match": {"type": "all"},
+                "actions": [{"type": "payload_replace",
+                             "find": "ORIGINAL-TOKEN", "replace": "INJECTED-TOKEN"}],
+            })
+            win.act_arm.setChecked(True)                    # arm so the rule applies
+            win.mode_combo.setCurrentText("Bridge")
+            for combo, iface in ((win.iface_combo, lab["port_a"]), (win.peer_combo, lab["port_b"])):
+                combo.addItem(iface); combo.setCurrentText(iface)
+            win.start_bridge()
+            assert win.service is not None, "bridge service did not start"
+            time.sleep(0.5)
+
+            result: dict = {}
+
+            def do_curl():
+                r = netns_exec(lab["client_ns"], "curl", "-s", "-m", "8",
+                               f"http://{lab['server_ip']}:8000/page.html", check=False)
+                result["out"] = r.stdout
+
+            t = threading.Thread(target=do_curl, daemon=True); t.start()
+            # pump the GUI drain loop while the flow runs
+            for _ in range(80):
+                win._drain()
+                if result.get("out"):
+                    break
+                time.sleep(0.1)
+            t.join(timeout=5)
+
+            assert "INJECTED-TOKEN" in result.get("out", ""), \
+                f"GUI bridge did not rewrite: {result!r}"
+            assert win.table.rowCount() > 0, "capture table never filled from the bridge tap"
+            assert win.service.counters.modified >= 1
+        finally:
+            if win is not None:
+                win.stop_capture()
+            if server is not None:
+                server.terminate(); server.wait(timeout=3)
