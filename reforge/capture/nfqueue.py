@@ -187,11 +187,18 @@ def nft_forward_queue_rules(queue_num: int = 1,
          "{ type filter hook forward priority 0 ; }"],
     ]
     if victims:
-        elems = "{ " + ", ".join(victims) + " }"
-        install.append(["nft", "add", "rule", "inet", "reforge_q", "forward",
-                        "ip", "saddr", elems, "counter", "queue", "num", str(queue_num)])
-        install.append(["nft", "add", "rule", "inet", "reforge_q", "forward",
-                        "ip", "daddr", elems, "counter", "queue", "num", str(queue_num)])
+        # nft rejects an IPv6 literal in an `ip saddr` set (and vice-versa), so
+        # split the victim set by family and emit `ip`/`ip6` matchers accordingly.
+        v4 = [v for v in victims if ":" not in v]
+        v6 = [v for v in victims if ":" in v]
+        for fam, group in (("ip", v4), ("ip6", v6)):
+            if not group:
+                continue
+            elems = "{ " + ", ".join(group) + " }"
+            install.append(["nft", "add", "rule", "inet", "reforge_q", "forward",
+                            fam, "saddr", elems, "counter", "queue", "num", str(queue_num)])
+            install.append(["nft", "add", "rule", "inet", "reforge_q", "forward",
+                            fam, "daddr", elems, "counter", "queue", "num", str(queue_num)])
     else:
         install.append(["nft", "add", "rule", "inet", "reforge_q", "forward",
                         "counter", "queue", "num", str(queue_num)])

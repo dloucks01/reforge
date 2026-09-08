@@ -99,3 +99,20 @@ def test_hold_at_capacity_forwards_when_overflow_is_forward():
     # queue was full and overflow=forward -> packet is accepted, not dropped
     assert p.verdict == "accept"
     assert r.stats.held >= 1
+
+
+def test_nft_forward_rules_ipv6_victims_use_ip6_matcher():
+    install, _ = nft_forward_queue_rules(queue_num=3, victims=["fd00:9::50", "fd00:9::51"])
+    joined = [" ".join(c) for c in install]
+    assert any("ip6 saddr" in s and "fd00:9::50" in s for s in joined)
+    assert any("ip6 daddr" in s for s in joined)
+    assert not any(s.startswith("nft add rule inet reforge_q forward ip saddr") for s in joined)
+
+
+def test_nft_forward_rules_mixed_families_split():
+    install, _ = nft_forward_queue_rules(queue_num=1,
+                                         victims=["10.0.0.5", "fd00:9::50"])
+    joined = [" ".join(c) for c in install]
+    assert any("ip saddr" in s and "10.0.0.5" in s and ":" not in s.split("saddr")[1]
+               for s in joined)            # IPv4 in an ip matcher
+    assert any("ip6 saddr" in s and "fd00:9::50" in s for s in joined)   # IPv6 in ip6
