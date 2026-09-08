@@ -746,6 +746,13 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             self._nfq_runner = None
+        # wait for the runner loop to unbind the kernel queue before returning,
+        # so a quick restart (_start_inline calls _stop_inline first) can rebind
+        # the same queue number instead of failing with "Failed to create queue".
+        thread = getattr(self, "_nfq_thread", None)
+        if thread is not None:
+            thread.join(timeout=3.0)
+            self._nfq_thread = None
         for cmd in getattr(self, "_nfq_remove", []):
             subprocess.run(cmd, capture_output=True, check=False)
         self._nfq_remove = []

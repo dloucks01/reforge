@@ -135,11 +135,16 @@ class NfqueueRunner:
         self._nfq.bind(self.queue_num, lambda p: self.process(p))
         log.info("bound NFQUEUE %d; forwarded packets now manipulable", self.queue_num)
         s = socket.fromfd(self._nfq.get_fd(), socket.AF_UNIX, socket.SOCK_STREAM)
+        s.setblocking(False)     # else run_socket() can block on recv after the
+                                 # queue drains, and stop() can't interrupt it
         try:
             while self._running:
                 r, _, _ = select.select([s], [], [], 0.4)
                 if r:
-                    self._nfq.run_socket(s)
+                    try:
+                        self._nfq.run_socket(s)
+                    except BlockingIOError:
+                        pass     # nothing left to read this wake-up
         except Exception:
             log.exception("NFQUEUE loop error")
         finally:
@@ -148,6 +153,10 @@ class NfqueueRunner:
             except Exception:
                 pass
             s.close()
+            # drop the NetfilterQueue so its netlink socket is freed now, not at
+            # GC — otherwise a quick rebind of the same queue number can fail with
+            # "Failed to create queue".
+            self._nfq = None
 
     def stop(self) -> None:
         self._running = False
