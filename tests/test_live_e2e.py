@@ -841,3 +841,78 @@ def test_gui_start_inline_rewrites_victim_traffic():
                 mitm.stop()
             if server is not None:
                 server.terminate(); server.wait(timeout=3)
+
+
+def test_gui_interactive_intercept_holds_and_releases_via_panel():
+    """Full GUI interactive path: an Intercept-panel filter holds the victim's
+    HTTP request in the shared queue; the operator sees it in the panel and
+    releases it, and only then does the request reach the server."""
+    import tempfile
+
+    pytest.importorskip("netfilterqueue")
+    from PySide6.QtWidgets import QApplication
+
+    from reforge.attacks.arp_mitm import ArpMitm
+    from reforge.rules.filter import parse_filter
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+    docroot = tempfile.mkdtemp(prefix="rf-gui2-")
+    with open(os.path.join(docroot, "page.html"), "w") as fh:
+        fh.write("BANNER=HELD-THEN-RELEASED\n")
+
+    server = mitm = win = None
+    result: dict = {}
+    with SegmentLab() as net:
+        try:
+            server = subprocess.Popen(
+                ["ip", "netns", "exec", "rf-gw", "python3", "-m", "http.server",
+                 "8000", "--bind", net["gateway_ip4"]],
+                cwd=docroot, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.0)
+
+            atk_mac = _attacker_mac()
+            mitm = ArpMitm(ATTACKER_IFACE, [net["victim_ip4"]],
+                           gateway=net["gateway_ip4"], interval=1.0)
+            assert mitm.start(), mitm.warnings
+            netns_exec("rf-victim", "ping", "-c", "1", "-W", "1", net["gateway_ip4"],
+                       check=False)
+            assert _wait_flip(net["gateway_ip4"], atk_mac), "victim never routed through us"
+
+            from reforge.gui.main_window import MainWindow
+            win = MainWindow()
+            # operator sets an Intercept filter that holds the HTTP request
+            win._on_intercept_filter(parse_filter('Raw.load contains "GET /"'), "http get")
+            win._start_inline(ATTACKER_IFACE, [net["victim_ip4"]])
+            time.sleep(0.6)
+
+            def do_curl():
+                r = netns_exec("rf-victim", "curl", "-s", "-m", "10",
+                               f"http://{net['gateway_ip4']}:8000/page.html", check=False)
+                result["out"] = r.stdout
+
+            t = threading.Thread(target=do_curl, daemon=True); t.start()
+
+            # operator: the request is held; it shows in the panel; release it
+            held = False
+            for _ in range(40):
+                win.intercept_panel.refresh_pending()
+                if win.intercept_panel.table.rowCount() > 0:
+                    win.intercept_panel.table.selectRow(0)
+                    win.intercept_panel._on_select()
+                    win.intercept_panel._resolve("forward")
+                    held = True
+                    break
+                time.sleep(0.2)
+            assert held, "the victim's request was never held in the Intercept panel"
+
+            t.join(timeout=8)
+            assert "HELD-THEN-RELEASED" in result.get("out", ""), \
+                f"released request never reached the server: {result!r}"
+        finally:
+            if win is not None:
+                win._stop_inline()
+            if mitm is not None:
+                mitm.stop()
+            if server is not None:
+                server.terminate(); server.wait(timeout=3)
