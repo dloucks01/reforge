@@ -1047,3 +1047,76 @@ def test_gui_bridge_harvests_credentials_into_the_panels():
                 win.stop_capture()
             if server is not None:
                 server.terminate(); server.wait(timeout=3)
+
+
+def test_gui_kill_switch_releases_held_traffic_over_a_live_bridge():
+    """Safety: while the GUI bridge holds the client's request in the intercept
+    queue, hitting the kill-switch must release it (forward) so nothing is
+    stranded on the wire, and the stalled connection completes."""
+    import tempfile
+
+    from PySide6.QtWidgets import QApplication
+
+    from reforge.rules.filter import parse_filter
+    from reforge.testlab.netlab import BridgeFlowLab
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+    docroot = tempfile.mkdtemp(prefix="rf-kill-")
+    with open(os.path.join(docroot, "page.html"), "w") as fh:
+        fh.write("SERVED-AFTER-KILL\n")
+
+    server = win = None
+    result: dict = {}
+    with BridgeFlowLab() as lab:
+        try:
+            server = subprocess.Popen(
+                ["ip", "netns", "exec", lab["server_ns"], "python3", "-m", "http.server",
+                 "8000", "--bind", lab["server_ip"]],
+                cwd=docroot, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.0)
+
+            from reforge.gui.main_window import MainWindow
+            win = MainWindow()
+            win.act_arm.setChecked(True)
+            win._on_intercept_filter(parse_filter('Raw.load contains "GET /"'), "hold GET")
+            win.mode_combo.setCurrentText("Bridge")
+            for combo, iface in ((win.iface_combo, lab["port_a"]), (win.peer_combo, lab["port_b"])):
+                combo.addItem(iface); combo.setCurrentText(iface)
+            win.start_bridge()
+            assert win.service is not None
+            time.sleep(0.5)
+
+            def do_curl():
+                r = netns_exec(lab["client_ns"], "curl", "-s", "-m", "10",
+                               f"http://{lab['server_ip']}:8000/page.html", check=False)
+                result["out"] = r.stdout
+
+            t = threading.Thread(target=do_curl, daemon=True); t.start()
+
+            # wait until the request is actually held, then hit the kill-switch
+            held = False
+            for _ in range(50):
+                win._drain()
+                if win.intercept is not None and win.intercept.count() > 0:
+                    held = True
+                    break
+                time.sleep(0.1)
+            assert held, "the request was never held in the intercept queue"
+
+            win.kill_switch()                       # must release held traffic
+            assert win.act_arm.isChecked() is False
+
+            for _ in range(50):
+                win._drain()
+                if result.get("out"):
+                    break
+                time.sleep(0.1)
+            t.join(timeout=5)
+            assert "SERVED-AFTER-KILL" in result.get("out", ""), \
+                f"kill-switch stranded the held request: {result!r}"
+        finally:
+            if win is not None:
+                win.stop_capture()
+            if server is not None:
+                server.terminate(); server.wait(timeout=3)
