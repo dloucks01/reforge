@@ -98,3 +98,44 @@ def test_stream_harvester_and_msg_intercept_never_raise():
         sh.add_frame(b)
         mi.process(b, True, ("f", 1))
         mi.should_hold(b, True)
+
+
+def test_scapy_tree_rendering_never_raises_on_fuzz():
+    """The capture table renders every frame, including malformed ones."""
+    from reforge.dissect import scapy_tree
+    rng = random.Random(6)
+    base = bytes(Ether() / IP() / TCP(dport=80) / b"data")
+    pkts = []
+    for _ in range(300):
+        b = bytearray(base)
+        for _ in range(rng.randint(1, 6)):
+            b[rng.randrange(len(b))] = rng.randrange(256)
+        try:
+            pkts.append(Ether(bytes(b)))
+        except Exception:  # noqa: BLE001, S110 - fuzz corpus
+            pass
+    for p in pkts:
+        scapy_tree.summarize(p, index=0, ts=0.0)
+        scapy_tree.to_tree(p)
+
+
+def test_bad_pcap_surfaces_as_service_error_not_crash():
+    import tempfile
+    import time
+
+    from reforge.capture.pcap import PcapFileBackend
+    from reforge.core.capture_service import CaptureService
+
+    with tempfile.NamedTemporaryFile(suffix=".pcap", delete=False) as f:
+        f.write(os.urandom(80))
+        path = f.name
+    try:
+        svc = CaptureService(PcapFileBackend(path))
+        svc.start()
+        deadline = time.time() + 2.0
+        while time.time() < deadline and svc.running:
+            time.sleep(0.02)
+        svc.stop()
+        assert svc.error is not None and svc.running is False   # clean failure
+    finally:
+        os.unlink(path)
