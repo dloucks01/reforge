@@ -96,3 +96,22 @@ def test_reverse_ack_converts_down_full_roundtrip():
     ack = _rseg(1030)
     fr.apply(ack)
     assert ack[TCP].ack == 1014
+
+
+def test_flowrewrite_handles_ipv6_flows():
+    """seq/ack fix-up must work over IPv6 TCP (the flow key was IPv4-only, which
+    threw 'Layer [IP] not found' and discarded all IPv6 manipulation)."""
+    from scapy.layers.inet6 import IPv6
+
+    def s6(seq, load=b""):
+        p = IPv6(src="fd00::2", dst="fd00::1") / TCP(sport=80, dport=5000, seq=seq) / load
+        return p
+    def a6(ack):
+        return IPv6(src="fd00::1", dst="fd00::2") / TCP(sport=5000, dport=80, ack=ack)
+
+    fr = FlowRewriter()
+    fr.note_length_change(s6(1000), +5, orig_seq=1000)
+    fwd = s6(1010); fr.apply(fwd)
+    assert fwd[TCP].seq == 1015                # later IPv6 segment shifted +5
+    rev = a6(1015); fr.apply(rev)
+    assert rev[TCP].ack == 1010                # reverse IPv6 ack converted down

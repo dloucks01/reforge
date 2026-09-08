@@ -129,3 +129,13 @@ def test_seq_fixer_wraps_32bit():
     a2 = IP(src="1.1.1.1", dst="2.2.2.2") / TCP(sport=1, dport=2, seq=0xFFFFFFFF)
     fixer.apply(a2)
     assert a2[TCP].seq == 9  # (0xFFFFFFFF + 10) & 0xFFFFFFFF
+
+
+def test_tcpseqfixer_handles_ipv6():
+    from scapy.layers.inet6 import IPv6
+    fx = TcpSeqFixer()
+    fx.note_length_change(IPv6(src="fd00::2", dst="fd00::1") / TCP(sport=80, dport=9, seq=1000), +5)
+    fwd = IPv6(src="fd00::2", dst="fd00::1") / TCP(sport=80, dport=9, seq=1010)
+    assert fx.apply(fwd) and fwd[TCP].seq == 1015
+    rev = IPv6(src="fd00::1", dst="fd00::2") / TCP(sport=9, dport=80, ack=1015)
+    assert fx.apply(rev) and rev[TCP].ack == 1010

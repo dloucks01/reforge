@@ -30,17 +30,20 @@ def _before(a: int, b: int) -> bool:
     return 0 < d < _HALF
 
 
-def _fwd_key(pkt):
+def _ip_tcp(pkt):
     from scapy.layers.inet import IP, TCP
+    from scapy.layers.inet6 import IPv6
 
-    ip, tcp = pkt[IP], pkt[TCP]
+    return (pkt.getlayer(IP) or pkt.getlayer(IPv6)), pkt[TCP]
+
+
+def _fwd_key(pkt):
+    ip, tcp = _ip_tcp(pkt)
     return (ip.src, tcp.sport, ip.dst, tcp.dport)
 
 
 def _rev_key(pkt):
-    from scapy.layers.inet import IP, TCP
-
-    ip, tcp = pkt[IP], pkt[TCP]
+    ip, tcp = _ip_tcp(pkt)
     return (ip.dst, tcp.dport, ip.src, tcp.sport)
 
 
