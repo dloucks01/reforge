@@ -36,6 +36,8 @@ def extract_sni(data: bytes) -> str | None:
                 p = pos + 2
                 if data[p] == 0x00:
                     nlen = struct.unpack("!H", data[p + 1:p + 3])[0]
+                    if nlen == 0 or p + 3 + nlen > len(data):
+                        return None            # truncated/empty name is not a hostname
                     return data[p + 3:p + 3 + nlen].decode("utf-8", "replace")
                 return None
             pos += elen
