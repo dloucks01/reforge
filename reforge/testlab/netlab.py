@@ -76,14 +76,137 @@ def down_bridge_lab() -> None:
         del_iface(a)
 
 
+# ---------------------------------------------------------------------------
+# Namespaced segment lab: a real L2 segment with distinct hosts, so on-path
+# attacks (ARP/NDP MITM, NFQUEUE rewrite) can be proven end to end. A Linux
+# bridge carries three hosts — a victim and a gateway each in their own network
+# namespace, and the attacker in the default namespace (where the tool/tests
+# run). Every host gets an IPv4 and an IPv6 address, so both ARP and NDP MITM
+# have a genuine victim<->gateway path to intercept.
+# ---------------------------------------------------------------------------
+SEG_BRIDGE = "rf-br0"
+SEG_GW4, SEG_GW6 = "10.9.9.254", "fd00:9::254"
+SEG_ATTACKER = ("rf-atk", "rf-atk-br", "10.9.9.1/24", "fd00:9::1/64")
+# (namespace, host-side veth, bridge-side veth, ipv4/cidr, ipv6/cidr)
+SEG_HOSTS = [
+    ("rf-victim", "rf-vic", "rf-vic-br", "10.9.9.50/24", "fd00:9::50/64"),
+    ("rf-gw", "rf-gw-h", "rf-gw-br", f"{SEG_GW4}/24", f"{SEG_GW6}/64"),
+]
+
+
+def _run(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(list(args), check=check, capture_output=True, text=True)
+
+
+def ns_exists(ns: str) -> bool:
+    return subprocess.run(["ip", "netns", "pid", ns],
+                          capture_output=True, check=False).returncode == 0
+
+
+def netns_exec(ns: str, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    """Run a command inside namespace `ns`."""
+    return _run("ip", "netns", "exec", ns, *args, check=check)
+
+
+def neigh_table(ns: str, family: str = "-4") -> str:
+    """Return the neighbor (ARP/NDP) cache seen from inside `ns`."""
+    return netns_exec(ns, "ip", family, "neigh", "show", check=False).stdout
+
+
+def up_segment_lab() -> dict:
+    """Create the bridge + attacker + victim/gateway namespaces (idempotent)."""
+    if not iface_exists(SEG_BRIDGE):
+        _run("ip", "link", "add", SEG_BRIDGE, "type", "bridge")
+    _run("ip", "link", "set", SEG_BRIDGE, "up")
+
+    # attacker lives in the default namespace
+    atk, atk_br, atk4, atk6 = SEG_ATTACKER
+    if not iface_exists(atk):
+        _run("ip", "link", "add", atk, "type", "veth", "peer", "name", atk_br)
+    _run("ip", "link", "set", atk_br, "master", SEG_BRIDGE)
+    _run("ip", "link", "set", atk_br, "up")
+    _run("ip", "link", "set", atk, "up")
+    _run("sysctl", "-w", f"net.ipv6.conf.{atk}.accept_dad=0", check=False)
+    _run("ip", "-4", "addr", "replace", atk4, "dev", atk)
+    _run("ip", "-6", "addr", "replace", atk6, "dev", atk, check=False)
+
+    for ns, hveth, bveth, ip4, ip6 in SEG_HOSTS:
+        if not ns_exists(ns):
+            _run("ip", "netns", "add", ns)
+        if not iface_exists(bveth) and not _in_ns(ns, hveth):
+            _run("ip", "link", "add", hveth, "type", "veth", "peer", "name", bveth)
+        _run("ip", "link", "set", bveth, "master", SEG_BRIDGE, check=False)
+        _run("ip", "link", "set", bveth, "up", check=False)
+        _run("ip", "link", "set", hveth, "netns", ns, check=False)
+        netns_exec(ns, "ip", "link", "set", "lo", "up", check=False)
+        netns_exec(ns, "sysctl", "-w", f"net.ipv6.conf.{hveth}.accept_dad=0", check=False)
+        netns_exec(ns, "ip", "link", "set", hveth, "up", check=False)
+        netns_exec(ns, "ip", "-4", "addr", "replace", ip4, "dev", hveth, check=False)
+        netns_exec(ns, "ip", "-6", "addr", "replace", ip6, "dev", hveth, check=False)
+
+    # victim routes out via the gateway (so intercepting that path matters)
+    netns_exec("rf-victim", "ip", "-4", "route", "replace", "default", "via", SEG_GW4,
+               check=False)
+    netns_exec("rf-victim", "ip", "-6", "route", "replace", "default", "via", SEG_GW6,
+               check=False)
+    return {
+        "bridge": SEG_BRIDGE, "attacker": atk,
+        "attacker_ip4": atk4.split("/")[0], "attacker_ip6": atk6.split("/")[0],
+        "victim_ip4": "10.9.9.50", "victim_ip6": "fd00:9::50",
+        "gateway_ip4": SEG_GW4, "gateway_ip6": SEG_GW6,
+    }
+
+
+def _in_ns(ns: str, iface: str) -> bool:
+    return netns_exec(ns, "ip", "link", "show", iface, check=False).returncode == 0
+
+
+def down_segment_lab() -> None:
+    for ns, _h, bveth, _4, _6 in SEG_HOSTS:
+        if ns_exists(ns):
+            subprocess.run(["ip", "netns", "del", ns], capture_output=True, check=False)
+        del_iface(bveth)                       # bridge-side veth if it survived
+    del_iface(SEG_ATTACKER[0])
+    del_iface(SEG_BRIDGE)
+
+
+def _resync_scapy() -> None:
+    """Drop scapy's cached interface/route tables so it sees recreated veths.
+
+    Recreating an identically-named interface changes its ifindex; scapy caches
+    the old one and would then send on a stale index. Harmless if scapy isn't
+    imported or has no caches."""
+    try:
+        from scapy.all import conf
+        conf.ifaces.reload()
+        conf.route.resync()
+        conf.route6.resync()
+        conf.netcache.flush()      # drop cached IP->MAC (same IPs, new MACs per lab)
+    except Exception:
+        pass
+
+
+class SegmentLab:
+    """The namespaced segment as a context manager (root required)."""
+
+    def __enter__(self) -> dict:
+        self.info = up_segment_lab()
+        _resync_scapy()          # freshly-created veths -> drop scapy's stale iface cache
+        return self.info
+
+    def __exit__(self, *exc) -> None:
+        down_segment_lab()
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
     ap = argparse.ArgumentParser(description="Reforge veth test lab (needs root).")
-    ap.add_argument("action", choices=["up", "down", "status"])
+    ap.add_argument("action",
+                    choices=["up", "down", "status", "seg-up", "seg-down", "seg-status"])
     args = ap.parse_args(argv)
 
-    if args.action in ("up", "down") and not is_root():
+    if args.action in ("up", "down", "seg-up", "seg-down") and not is_root():
         print("needs root: re-run with sudo")
         return 1
     if args.action == "up":
@@ -93,6 +216,21 @@ def main(argv: list[str] | None = None) -> int:
     elif args.action == "down":
         down_bridge_lab()
         print("bridge lab removed")
+    elif args.action == "seg-up":
+        info = up_segment_lab()
+        print("segment lab up:")
+        for k, v in info.items():
+            print(f"  {k}: {v}")
+        print("attacker = default ns; MITM victim <-> gateway with the tool or "
+              "tests/test_live_mitm.py")
+    elif args.action == "seg-down":
+        down_segment_lab()
+        print("segment lab removed")
+    elif args.action == "seg-status":
+        print(f"{SEG_BRIDGE}: {'present' if iface_exists(SEG_BRIDGE) else 'absent'}")
+        print(f"{SEG_ATTACKER[0]}: {'present' if iface_exists(SEG_ATTACKER[0]) else 'absent'}")
+        for ns, *_ in SEG_HOSTS:
+            print(f"{ns}: {'present' if ns_exists(ns) else 'absent'}")
     else:
         for _a, _b in BRIDGE_LAB:
             for n in (_a, _b):

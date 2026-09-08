@@ -10,8 +10,13 @@ def test_mixed_scenario_groups_into_flows():
     ft = FlowTracker()
     for ts, data in T.mixed_scenario():
         ft.observe(ts, data)
-    assert ft.count() == 5                       # 2 HTTP, 1 large HTTP, 1 FTP, 1 DNS
+    # richer scenario: HTTP x3, large HTTP, FTP, DNS, TLS, out-of-order, ICMP,
+    # UDP syslog, plus an IPv6 HTTP flow — grouped into distinct conversations
+    assert ft.count() >= 9
     flows = ft.flows()
+    protos = {f.proto for f in flows}
+    assert {"TCP", "UDP", "ICMP"} <= protos
+    assert any(":" in f.a_ip for f in flows)     # an IPv6 conversation is tracked
     # most-recently-active first
     assert flows == sorted(flows, key=lambda f: f.last, reverse=True)
 

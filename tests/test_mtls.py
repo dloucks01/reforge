@@ -7,14 +7,15 @@ import time
 
 from reforge.distributed.collector import Collector
 from reforge.distributed.network import CollectorServer, NetworkSink
-from reforge.distributed.tls import dev_mtls
 from reforge.distributed.sensor import Sensor
+from reforge.distributed.tls import dev_mtls
 
 
 def _base32frame():
+    import base64
+
     from scapy.layers.inet import IP, TCP
     from scapy.layers.l2 import Ether
-    import base64
 
     tok = base64.b64encode(b"root:toor").decode()
     req = f"GET / HTTP/1.1\r\nHost: t\r\nAuthorization: Basic {tok}\r\n\r\n".encode()

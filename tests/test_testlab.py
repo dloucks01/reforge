@@ -64,3 +64,52 @@ def test_write_demo_pcap(tmp_path):
     backend.open()
     assert len(backend.recv_burst(1000)) == n and n > 20
     backend.close()
+
+
+# ---- high-fidelity builders (IPv6 / TLS / out-of-order / ICMP / UDP) -------
+def test_ipv6_flow_is_ipv6():
+    from scapy.layers.inet6 import IPv6
+    p = Ether(T.http6_login()[0][1])
+    assert p.haslayer(IPv6)
+
+
+def test_tls_client_hello_carries_parseable_sni():
+    from reforge.attacks.tls_sni import extract_sni
+    assert extract_sni(T.tls_client_hello("host.example")) == "host.example"
+
+
+def test_https_flow_segment_has_sni():
+    from scapy.packet import Raw
+
+    from reforge.attacks.tls_sni import extract_sni
+    seen = None
+    for _t, fb in T.https_client_hello(sni="wiki.corp.local"):
+        p = Ether(fb)
+        if p.haslayer(TCP) and p.haslayer(Raw) and p[TCP].dport == 443:
+            seen = extract_sni(bytes(p[Raw].load))
+    assert seen == "wiki.corp.local"
+
+
+def test_out_of_order_flow_reassembles_exactly():
+    from reforge.core.tcpreasm import TcpReassembler
+    tr = TcpReassembler()
+    streams: dict = {}
+    for _t, fb in T.tcp_flow_out_of_order():
+        for key, data in tr.process(Ether(fb)):
+            streams[key] = streams.get(key, b"") + data
+    body = b"".join(streams.values())
+    assert b"PART1PART2PART3" in body
+    assert body.count(b"PART1") == 1          # retransmit collapsed, not duplicated
+
+
+def test_icmp_and_udp_builders():
+    from scapy.layers.inet import ICMP, UDP
+    assert Ether(T.icmp_echo()[0][1]).haslayer(ICMP)
+    assert Ether(T.udp_syslog()[0][1]).haslayer(UDP)
+
+
+def test_mixed_scenario_now_spans_ipv6_and_more_protocols():
+    from scapy.layers.inet6 import IPv6
+    m = T.mixed_scenario()
+    assert any(Ether(fb).haslayer(IPv6) for _t, fb in m)
+    assert len(m) > 30

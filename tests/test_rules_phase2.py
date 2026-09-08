@@ -7,11 +7,11 @@ from scapy.layers.l2 import Ether
 
 from reforge.core.apply import apply_engine
 from reforge.core.packet import Packet
-from reforge.rules.base import Disposition, Rule
-from reforge.rules.engine import RuleEngine
 from reforge.rules import actions as A
 from reforge.rules import matchers as M
 from reforge.rules import spec as S
+from reforge.rules.base import Disposition, Rule
+from reforge.rules.engine import RuleEngine
 
 
 def _frame(dst="10.0.0.1", dport=80, payload=b"GET / HTTP/1.1\r\n"):

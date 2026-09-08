@@ -9,9 +9,9 @@ from reforge.core.apply import apply_engine
 from reforge.core.packet import Packet
 from reforge.core.tcpflow import TcpSeqFixer
 from reforge.craft import builder, fuzz
-from reforge.rules.base import Rule
 from reforge.rules import matchers as M
 from reforge.rules import spec as S
+from reforge.rules.base import Rule
 from reforge.rules.engine import RuleEngine
 
 

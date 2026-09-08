@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from scapy.layers.inet import IP, ICMP, TCP
+from scapy.layers.inet import ICMP, IP, TCP
 from scapy.layers.l2 import Ether
 
 from reforge.core.bridge import UserspaceBridge
