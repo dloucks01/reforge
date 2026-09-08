@@ -628,6 +628,7 @@ class InterceptPanel(QWidget):
         pid, orig = self._current_id, self._orig_bytes
         if action == "modify":
             self._sync_from_editor()            # capture the latest hex/ascii edit
+            self._work = self._finalize_packet(self._work)   # valid checksums on the wire
         out = self._work if action == "modify" else None
         self.queue.resolve(pid, action, out)
         self._show_result(action, pid, orig, self._work)
@@ -640,6 +641,22 @@ class InterceptPanel(QWidget):
         self.orig_hex.clear()
         self._mod_label.setText("Modified \u2014 editable")
         self._set_buttons_enabled(False)
+
+    def _finalize_packet(self, data: bytes) -> bytes:
+        """Recompute checksums/lengths for an edited packet so it is valid on the
+        wire. Field edits already rebuild via scapy, but hex/ASCII payload edits
+        write raw bytes and would otherwise carry a stale TCP/IP/UDP checksum that
+        the receiver drops. Message-kind (proxy) intercepts have no L3 checksums,
+        and an unparseable edit is forwarded as-is."""
+        if self._current_kind == "message":
+            return data
+        try:
+            pkt = Packet.from_bytes(data, link=self._current_link)
+            pkt.scapy()                         # dissect first (rebuild no-ops without it)
+            pkt.modified = True                 # force auto-field (chksum/len) recompute
+            return pkt.rebuild()
+        except Exception:
+            return data
 
     def _describe_change(self, orig: bytes, work: bytes) -> str:
         try:

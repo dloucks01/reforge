@@ -156,3 +156,29 @@ def test_send_to_builder_callback(app):
     p.on_send_to_builder = lambda data: got.setdefault("data", data)
     p._send_to_builder(_frame())
     assert got.get("data") == _frame()
+
+
+def test_hex_edit_recomputes_checksums_so_packet_is_valid(app):
+    """A hex/ASCII payload edit must produce a packet with valid checksums, or the
+    inline receiver would drop it (field edits already rebuild; raw edits didn't)."""
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+    from scapy.packet import Raw
+
+    orig = bytes(Ether() / IP() / TCP(dport=80) / Raw(b"AAAA"))
+    p, _q, out = _held(app, orig)
+    # edit the payload in ASCII view (raw bytes, no scapy rebuild on the operator side)
+    p.view_combo.setCurrentText("ASCII")
+    txt = p.hex_edit.toPlainText().replace("AAAA", "BBBB")
+    p.hex_edit.setPlainText(txt)
+    p._resolve("modify")
+
+    forwarded = out["v"]
+    assert forwarded.endswith(b"BBBB")                 # the edit is present
+    # and the checksums are valid: re-dissecting and re-serializing is a no-op
+    pkt = Ether(forwarded)
+    good_ip = pkt[IP].chksum
+    good_tcp = pkt[TCP].chksum
+    del pkt[IP].chksum, pkt[TCP].chksum
+    fixed = Ether(bytes(pkt))                            # scapy recomputes here
+    assert fixed[IP].chksum == good_ip and fixed[TCP].chksum == good_tcp

