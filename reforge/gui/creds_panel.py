@@ -27,6 +27,7 @@ class CredsPanel(QWidget):
         self.extractor = CredentialExtractor()   # per-packet (incl. non-TCP: SNMP)
         self.stream = StreamHarvester()          # multi-segment TCP reassembly
         self._seen: set = set()
+        self.harvested: list = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(4, 4, 4, 4)
@@ -62,6 +63,7 @@ class CredsPanel(QWidget):
             if key in self._seen:
                 continue
             self._seen.add(key)
+            self.harvested.append(c.as_dict())
             self._add_row(c)
             added = True
         if added:
@@ -83,3 +85,20 @@ class CredsPanel(QWidget):
         self.extractor = CredentialExtractor()
         self.stream = StreamHarvester()
         self.count.setText("Credentials harvested: 0")
+
+    def harvested_creds(self) -> list:
+        return list(self.harvested)
+
+    def load_creds(self, dicts) -> None:
+        from types import SimpleNamespace
+        for d in dicts:
+            key = (d.get("kind"), d.get("username"), d.get("secret"), d.get("src"), d.get("dst"))
+            if key in self._seen:
+                continue
+            self._seen.add(key)
+            self.harvested.append(dict(d))
+            self._add_row(SimpleNamespace(
+                kind=d.get("kind", ""), proto=d.get("proto", ""),
+                src=d.get("src", ""), dst=d.get("dst", ""),
+                username=d.get("username", ""), secret=d.get("secret", "")))
+        self.count.setText(f"Credentials harvested: {len(self._seen)}")

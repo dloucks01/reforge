@@ -60,7 +60,9 @@ class AttacksPanel(QWidget):
         self.get_intercept_queue = None
         self.on_start_inline = None   # (iface, victims) -> divert forwarded traffic to NFQUEUE
         self.on_stop_inline = None
+        self.on_event = None          # (kind, detail) -> engagement timeline
         self._inline_started = False
+        self._arp_logged = False
         self._arp = None
         self._dns = None
         self._name = None
@@ -209,7 +211,11 @@ class AttacksPanel(QWidget):
                 self.arp_status.setText(f"error: {res[1]}")
                 self.arp_status.setStyleSheet("color:#ff5c6c; font-weight:600;")
         if self._arp is not None and self._arp.status().get("running"):
-            self._render_arp_status(self._arp.status())
+            st = self._arp.status()
+            self._render_arp_status(st)
+            if not self._arp_logged and self.on_event is not None:
+                self._arp_logged = True
+                self.on_event("mitm", "ARP: " + ", ".join(st['targets']) + " <-> " + str(st['gateway']))
             if (self.arp_intercept.isChecked() and not self._inline_started
                     and self.on_start_inline is not None):
                 self._inline_started = True
@@ -232,6 +238,9 @@ class AttacksPanel(QWidget):
             f"color:{'#3ddc97' if fwd_ok else '#ff5c6c'}; font-weight:700;")
 
     def _arp_stop(self):
+        if self._arp_logged and self.on_event is not None:
+            self.on_event("mitm-stop", "ARP caches restored")
+            self._arp_logged = False
         if self._inline_started and self.on_stop_inline is not None:
             try:
                 self.on_stop_inline()

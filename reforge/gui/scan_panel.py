@@ -44,6 +44,7 @@ class ScanPanel(QWidget):
     def __init__(self, get_inventory: Callable | None = None, parent=None):
         super().__init__(parent)
         self._get_inv = get_inventory
+        self.on_scan_done = None
         self._worker: threading.Thread | None = None
         self._rows: list[tuple] = []
 
@@ -138,3 +139,5 @@ class ScanPanel(QWidget):
             for c, v in enumerate((host, port, state, svc)):
                 self.table.setItem(r, c, QTableWidgetItem(v))
         self.status.setText(f"Done — {len(self._rows)} result(s).")
+        if self.on_scan_done is not None:
+            self.on_scan_done(f"{self.target.text().strip()} -> {len(self._rows)} result(s)")

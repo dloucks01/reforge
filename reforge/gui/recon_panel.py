@@ -70,3 +70,19 @@ class ReconPanel(QWidget):
         self.inv = AssetInventory()
         self.table.setRowCount(0)
         self.count.setText("Hosts discovered: 0")
+
+    def host_dicts(self) -> list:
+        return [{"ip": h.ip, "mac": h.mac, "os_family": h.os_family,
+                 "services": dict(h.services), "hostnames": sorted(h.hostnames)}
+                for h in self.inv.list_hosts()]
+
+    def load_hosts(self, dicts) -> None:
+        for d in dicts:
+            h = self.inv._host(d.get("ip", ""), d.get("mac", ""))
+            if d.get("os_family") and not h.os_family:
+                h.os_family = d["os_family"]
+            for p, sv in (d.get("services") or {}).items():
+                h.services[int(p)] = sv
+            for n in d.get("hostnames") or []:
+                h.hostnames.add(n)
+        self._dirty = True

@@ -39,12 +39,13 @@ from reforge.capture.afpacket import AfPacketBackend
 from reforge.capture.base import Frame
 from reforge.capture.pcap import PcapFileBackend, export_pcap
 from reforge.capture.registry import list_interfaces
-from reforge.constants import APP_NAME, TAGLINE, VERSION
+from reforge.constants import APP_NAME, CONFIG_DIR, TAGLINE, VERSION, ensure_dirs
 from reforge.core.capture_service import CaptureService
 from reforge.core.flows import FlowTracker
 from reforge.core.intercept import InterceptQueue
 from reforge.core.packet import Packet
 from reforge.dissect import scapy_tree
+from reforge.engage import Engagement
 from reforge.gui import theme
 from reforge.gui.attacks_panel import AttacksPanel
 from reforge.gui.builder_panel import BuilderPanel
@@ -90,6 +91,9 @@ class MainWindow(QMainWindow):
         self._transforms: list = []                   # persistent promoted rewrite rules
         self.packets: list[tuple[float, Frame]] = []  # captured (ts, frame)
         self.flows = FlowTracker()
+        ensure_dirs()
+        self._engagement_path = CONFIG_DIR / "engagement.json"
+        self.engagement = Engagement.load(self._engagement_path)
         self._t0: float | None = None
 
         self._mono_small = QFont("JetBrains Mono", 11)
@@ -105,6 +109,12 @@ class MainWindow(QMainWindow):
 
         self._load_settings()                 # restore last-used inputs
         self._restore_layout()                # restore the pane split + workspaces
+        try:
+            self.recon_panel.load_hosts(self.engagement.hosts)
+            self.creds_panel.load_creds(self.engagement.creds)
+            self.recon_panel.refresh()
+        except Exception:
+            log.debug("engagement restore failed", exc_info=True)
         self.statusBar().showMessage("Idle — open a pcap or start a live capture")
 
     def _save_layout(self) -> None:
@@ -225,6 +235,10 @@ class MainWindow(QMainWindow):
         self.act_plugins = act("Plugins\u2026", self.load_plugins)
         self.act_vault = act("Vault\u2026", self.vault_tool,
                              tip="Encrypt/decrypt an engagement artifact at rest")
+        self.act_report = act("Export report\u2026", self._export_report,
+                              tip="Save an HTML engagement report (hosts, creds, timeline)")
+        self.act_new_engagement = act("New engagement", self._new_engagement,
+                                      tip="Clear the current hosts, creds, and timeline")
         self.act_theme = act("", self.toggle_theme)
         self._update_theme_action()
         for a in (self.act_start, self.act_stop, self.act_guide):
@@ -266,8 +280,10 @@ class MainWindow(QMainWindow):
         self.attacks_panel.get_intercept_queue = self._shared_intercept_queue
         self.attacks_panel.on_start_inline = self._start_inline
         self.attacks_panel.on_stop_inline = self._stop_inline
+        self.attacks_panel.on_event = self.engagement.log
         self.recon_panel = ReconPanel()
         self.scan_panel = ScanPanel(get_inventory=lambda: self.recon_panel.inv)
+        self.scan_panel.on_scan_done = lambda d: self.engagement.log("scan", d)
         self.scenario_panel = ScenarioPanel()
         self.console_panel = ConsolePanel()
         self.guide_panel = GuidePanel()
@@ -352,6 +368,9 @@ class MainWindow(QMainWindow):
             menu.addAction(a)
         menu.addSeparator()
         for a in (self.act_doctor, self.act_plugins, self.act_vault):
+            menu.addAction(a)
+        menu.addSeparator()
+        for a in (self.act_report, self.act_new_engagement):
             menu.addAction(a)
         overflow.setMenu(menu)
         row.addWidget(overflow)
@@ -544,6 +563,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Capture error", explain(exc))
             return
+        self.engagement.log("capture", "live on " + iface)
         self._start_service(CaptureService(backend), f"live on {iface}")
 
     def start_bridge(self) -> None:
@@ -570,6 +590,7 @@ class MainWindow(QMainWindow):
                                  flow_rewrite=self.act_seqfix.isChecked(),
                                  checksum_fixup=self.act_csum.isChecked())
         state = "ARMED" if armed else "pass-through (safe)"
+        self.engagement.log("bridge", a + " <-> " + b + " [" + state + "]")
         self._start_service(bridge, f"bridge {a} <-> {b}  [{state}]", reset=False)
 
     def open_pcap(self) -> None:
@@ -578,12 +599,14 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        self.engagement.log("pcap", str(path))
         self._start_service(CaptureService(PcapFileBackend(path)), f"pcap {path}")
 
     def start_demo(self) -> None:
         """Replay synthetic lab traffic as a live capture (offline test env)."""
         from reforge.testlab.synthetic import SyntheticBackend
 
+        self.engagement.log("demo", "synthetic lab traffic")
         self._start_service(CaptureService(SyntheticBackend(loop=True)),
                             "demo — synthetic lab traffic (looping)")
 
@@ -663,6 +686,7 @@ class MainWindow(QMainWindow):
             self._install_intercept_filter(self.engine)
         self.intercept_panel.set_transform_count(len(self._transforms))
         desc = describe_actions(actions)
+        self.engagement.log("transform", desc)
         return f"Transform added ({desc}) — applies to all matching traffic and resends."
 
     def _send_to_builder(self, data: bytes) -> None:
@@ -707,6 +731,7 @@ class MainWindow(QMainWindow):
         self._nfq_runner = NfqueueRunner(engine, queue_num=1, intercept=queue)
         self._nfq_thread = threading.Thread(target=self._nfq_runner.run, daemon=True)
         self._nfq_thread.start()
+        self.engagement.log("mitm-inline", "NFQUEUE victims: " + ", ".join(victims or []))
         self.statusBar().showMessage("Inline manipulation ON — victim traffic flows through "
                                      "the Intercept tab. Set a filter to hold, or add rules.")
         return "inline via NFQUEUE"
@@ -724,6 +749,56 @@ class MainWindow(QMainWindow):
         for cmd in getattr(self, "_nfq_remove", []):
             subprocess.run(cmd, capture_output=True, check=False)
         self._nfq_remove = []
+
+    def _snapshot_engagement(self) -> None:
+        try:
+            self.engagement.snapshot(hosts=self.recon_panel.host_dicts(),
+                                     creds=self.creds_panel.harvested_creds())
+        except Exception:
+            log.debug("engagement snapshot failed", exc_info=True)
+
+    def _report_stats(self) -> dict:
+        st = {"packets": len(self.packets), "flows": self.flows.count()}
+        if self.intercept is not None:
+            s = self.intercept.stats
+            st["forwarded"] = s.get("forwarded", 0) + s.get("modified", 0)
+            st["modified"] = s.get("modified", 0)
+            st["dropped"] = s.get("dropped", 0)
+        return st
+
+    def _export_report(self) -> None:
+        self._snapshot_engagement()
+        path, _ = QFileDialog.getSaveFileName(self, "Export engagement report",
+                                              "reforge-report.html",
+                                              "HTML (*.html);;Markdown (*.md);;JSON (*.json)")
+        if not path:
+            return
+        try:
+            if path.endswith(".md"):
+                data = self.engagement.render_markdown()
+            elif path.endswith(".json"):
+                data = self.engagement.to_report().to_json()
+            else:
+                data = self.engagement.render_html(self._report_stats())
+            with open(path, "w") as fh:
+                fh.write(data)
+            self.statusBar().showMessage(f"Report written to {path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Report error", explain(exc))
+
+    def _new_engagement(self) -> None:
+        if QMessageBox.question(self, "New engagement",
+                                "Clear the current hosts, credentials, and timeline?") \
+                != QMessageBox.Yes:
+            return
+        self.engagement.reset()
+        self.recon_panel.clear()
+        self.creds_panel.table.setRowCount(0)
+        self.creds_panel._seen.clear()
+        self.creds_panel.harvested.clear()
+        self.creds_panel.count.setText("Credentials harvested: 0")
+        self.engagement.save(self._engagement_path)
+        self.statusBar().showMessage("New engagement — cleared.")
 
     def _shared_intercept_queue(self):
         """Return the intercept queue (creating one if no bridge is running).
@@ -1021,6 +1096,11 @@ class MainWindow(QMainWindow):
         self._save_layout()                   # remember the pane split + workspaces
         self._stop_inline()
         self.stop_capture()
+        self._snapshot_engagement()
+        try:
+            self.engagement.save(self._engagement_path)
+        except Exception:
+            log.debug("engagement save failed", exc_info=True)
         for cleanup in (self.attacks_panel.stop_all, self.console_panel.stop):
             try:
                 cleanup()
