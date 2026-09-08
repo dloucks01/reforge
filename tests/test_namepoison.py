@@ -45,12 +45,27 @@ def test_build_response_none_for_ordinary_dns():
     assert N.build_response(IP() / UDP(dport=53) / DNS(qd=DNSQR(qname="x")), "1.1.1.1") is None
 
 
-def test_nbtns_query_detected_and_response_safe():
-    from scapy.layers.netbios import NBNSQueryRequest
-    q = IP(src="10.0.0.50", dst="10.0.0.255") / UDP(sport=50000, dport=137) / \
-        NBNSQueryRequest(QUESTION_NAME="FILESERVER")
+def test_nbtns_query_and_poisoned_response():
+    from scapy.layers.netbios import (
+        NBNSHeader,
+        NBNSQueryRequest,
+        NBNSQueryResponse,
+    )
+    q = (IP(src="10.0.0.50", dst="10.0.0.255") / UDP(sport=50000, dport=137)
+         / NBNSHeader(NAME_TRN_ID=0x4242) / NBNSQueryRequest(QUESTION_NAME="FILESERVER"))
     name = N.queried_name(q)
     assert name is not None and "FILESERVER" in name.upper()   # NBT-NS query detected
-    # response crafting must never raise (returns a response or None on this stack)
+
     resp = N.build_response(q, "10.0.0.66")
-    assert resp is None or resp[UDP].sport == 137
+    assert resp is not None
+    assert resp[UDP].sport == 137
+    assert int(resp[NBNSHeader].NAME_TRN_ID) == 0x4242          # transaction echoed
+    assert resp[NBNSQueryResponse].ADDR_ENTRY[0].NB_ADDRESS == "10.0.0.66"  # points at us
+    assert len(bytes(resp)) > 0                                 # serializes to the wire
+
+
+def test_nbtns_response_without_header_still_builds():
+    from scapy.layers.netbios import NBNSQueryRequest
+    q = IP() / UDP(sport=50000, dport=137) / NBNSQueryRequest(QUESTION_NAME="PRINTER")
+    resp = N.build_response(q, "10.0.0.66")
+    assert resp is not None and len(bytes(resp)) > 0            # trn defaults to 0

