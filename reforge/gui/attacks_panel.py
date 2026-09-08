@@ -6,17 +6,23 @@ For authorized testing only.
 
 from __future__ import annotations
 
+import threading
+
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -76,31 +82,138 @@ class AttacksPanel(QWidget):
 
     # ---- ARP ----------------------------------------------------------------
     def _arp_box(self) -> QGroupBox:
-        box = QGroupBox("ARP cache poisoning (become the gateway)")
+        box = QGroupBox("ARP man-in-the-middle — discover a segment, pick victims, MITM")
         v = QVBoxLayout(box)
         row = QHBoxLayout()
         self.arp_if = QComboBox(); self.arp_if.addItems(_ifaces())
-        self.arp_victim = QLineEdit(); self.arp_victim.setPlaceholderText("victim IP")
-        self.arp_gw = QLineEdit(); self.arp_gw.setPlaceholderText("gateway IP")
-        b_start = QPushButton("Start"); b_start.clicked.connect(self._arp_start)
-        b_stop = QPushButton("Stop"); b_stop.clicked.connect(self._arp_stop)
-        for w in (QLabel("Iface:"), self.arp_if, self.arp_victim, self.arp_gw, b_start, b_stop):
+        self.arp_gw = QLineEdit(); self.arp_gw.setPlaceholderText("gateway (auto)")
+        self.arp_gw.setMaximumWidth(150)
+        b_disc = QPushButton("Discover hosts"); b_disc.clicked.connect(self._arp_discover)
+        self.arp_start_btn = QPushButton("Start MITM"); self.arp_start_btn.clicked.connect(self._arp_start)
+        b_stop = QPushButton("Restore && stop"); b_stop.clicked.connect(self._arp_stop)
+        for w in (QLabel("Iface:"), self.arp_if, QLabel("GW:"), self.arp_gw,
+                  b_disc, self.arp_start_btn, b_stop):
             row.addWidget(w)
         v.addLayout(row)
-        self.arp_status = QLabel("idle"); v.addWidget(self.arp_status)
+
+        self.arp_hosts = QTableWidget(0, 2)
+        self.arp_hosts.setHorizontalHeaderLabels(["Victim (check to target)", "MAC"])
+        self.arp_hosts.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.arp_hosts.verticalHeader().setVisible(False)
+        self.arp_hosts.setMaximumHeight(150)
+        self.arp_hosts.setSelectionMode(QTableWidget.NoSelection)
+        self.arp_hosts.setEditTriggers(QTableWidget.NoEditTriggers)
+        v.addWidget(self.arp_hosts)
+
+        self.arp_status = QLabel("Pick an interface and Discover hosts. Then check victims and Start MITM.")
+        self.arp_status.setWordWrap(True)
+        v.addWidget(self.arp_status)
+
+        self._arp = None
+        self._arp_busy = False
+        self._arp_result = None
+        self._arp_timer = QTimer(self); self._arp_timer.setInterval(400)
+        self._arp_timer.timeout.connect(self._arp_tick)
         return box
 
+    def _arp_checked_victims(self) -> list:
+        gw = self.arp_gw.text().strip()
+        out = []
+        for r in range(self.arp_hosts.rowCount()):
+            it = self.arp_hosts.item(r, 0)
+            if it is not None and it.checkState() == Qt.Checked:
+                ip = it.data(Qt.UserRole)
+                if ip and ip != gw:
+                    out.append(ip)
+        return out
+
+    def _arp_discover(self):
+        if self._arp_busy:
+            return
+        iface = self.arp_if.currentText()
+        self._arp_busy = True
+        self.arp_status.setText(f"Discovering hosts on {iface}… (ARP-scanning the subnet)")
+        self.arp_status.setStyleSheet("")
+
+        def work():
+            try:
+                from reforge.attacks.arp_mitm import default_gateway, discover_hosts
+                hosts = discover_hosts(iface)
+                self._arp_result = ("hosts", hosts, default_gateway(iface))
+            except Exception as exc:
+                self._arp_result = ("error", explain(exc))
+
+        threading.Thread(target=work, daemon=True).start()
+        self._arp_timer.start()
+
     def _arp_start(self):
-        from reforge.attacks.arp_spoof import ArpSpoofer
+        from reforge.attacks.arp_mitm import ArpMitm
 
         self._arp_stop()
-        self._arp = ArpSpoofer(self.arp_if.currentText(), self.arp_victim.text().strip(),
-                               self.arp_gw.text().strip())
-        try:
-            ok = self._arp.start()
-            self.arp_status.setText("poisoning…" if ok else "failed to resolve MACs (root? live net?)")
-        except Exception as exc:
-            self.arp_status.setText(f"error: {explain(exc)}")
+        victims = self._arp_checked_victims()
+        if not victims:
+            self.arp_status.setText("Check at least one victim in the list first.")
+            return
+        gw = self.arp_gw.text().strip() or None
+        self._arp = ArpMitm(self.arp_if.currentText(), victims, gateway=gw)
+        self._arp_busy = True
+        self.arp_status.setText("Starting MITM (resolving MACs, enabling forwarding)…")
+
+        def work():
+            try:
+                if not self._arp.start():
+                    self._arp_result = ("startfail", "; ".join(self._arp.warnings) or "could not start")
+            except Exception as exc:
+                self._arp_result = ("error", explain(exc))
+
+        threading.Thread(target=work, daemon=True).start()
+        self._arp_timer.start()
+
+    def _populate_hosts(self, hosts, gw):
+        self.arp_hosts.setRowCount(0)
+        for ip, mac in hosts:
+            r = self.arp_hosts.rowCount(); self.arp_hosts.insertRow(r)
+            label = ip + ("  (gateway)" if gw and ip == gw else "")
+            item = QTableWidgetItem(label)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            item.setData(Qt.UserRole, ip)
+            self.arp_hosts.setItem(r, 0, item)
+            self.arp_hosts.setItem(r, 1, QTableWidgetItem(mac))
+        if gw and not self.arp_gw.text().strip():
+            self.arp_gw.setText(gw)
+
+    def _arp_tick(self):
+        res, self._arp_result = self._arp_result, None
+        if res is not None:
+            self._arp_busy = False
+            if res[0] == "hosts":
+                _tag, hosts, gw = res
+                self._populate_hosts(hosts, gw)
+                self.arp_status.setText(
+                    f"Found {len(hosts)} host(s). Check victims (gateway {gw or '?'} used "
+                    "automatically), then Start MITM.")
+            elif res[0] == "startfail":
+                self.arp_status.setText(f"Could not start: {res[1]}")
+                self.arp_status.setStyleSheet("color:#ff5c6c; font-weight:600;")
+            elif res[0] == "error":
+                self.arp_status.setText(f"error: {res[1]}")
+                self.arp_status.setStyleSheet("color:#ff5c6c; font-weight:600;")
+        if self._arp is not None and self._arp.status().get("running"):
+            self._render_arp_status(self._arp.status())
+        elif self._arp is None and not self._arp_busy:
+            self._arp_timer.stop()
+
+    def _render_arp_status(self, st):
+        fwd_ok = st["forwarding_on"]
+        fwd = "ON" if fwd_ok else "OFF ⚠ victims will lose connectivity"
+        msg = (f"● MITM ACTIVE — {len(st['targets'])} target(s) ↔ {st['gateway']}   "
+               f"forwarding {fwd}   ·   relayed {st['relayed']}   ·   poison sent {st['sent']}")
+        if st["unresolved"]:
+            msg += f"   (unresolved: {', '.join(st['unresolved'])})"
+        self.arp_status.setText(msg)
+        self.arp_status.setStyleSheet(
+            f"color:{'#3ddc97' if fwd_ok else '#ff5c6c'}; font-weight:700;")
 
     def _arp_stop(self):
         if self._arp:
@@ -109,7 +222,8 @@ class AttacksPanel(QWidget):
             except Exception:
                 pass
             self._arp = None
-            self.arp_status.setText("stopped (restored)")
+            self.arp_status.setText("Stopped — ARP caches restored.")
+            self.arp_status.setStyleSheet("")
 
     # ---- DNS ----------------------------------------------------------------
     def _dns_box(self) -> QGroupBox:
