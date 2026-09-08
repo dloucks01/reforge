@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QBrush, QColor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
@@ -48,6 +49,7 @@ _PRESETS = [
 ]
 
 HELD_COLUMNS = ["ID", "Ingress", "Proto", "Info", "Age"]
+SENT_COLUMNS = ["#", "Action", "Info", "\u0394", "At"]
 _LAYER_FIELD = Qt.UserRole + 1
 
 
@@ -148,7 +150,8 @@ class InterceptPanel(QWidget):
 
         split = QSplitter(Qt.Vertical)
 
-        # held queue
+        # queue tabs: Held (pending) | Sent (resolved history)
+        self.queue_tabs = QTabWidget()
         self.table = QTableWidget(0, len(HELD_COLUMNS))
         self.table.setHorizontalHeaderLabels(HELD_COLUMNS)
         self.table.verticalHeader().setVisible(False)
@@ -157,7 +160,18 @@ class InterceptPanel(QWidget):
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.itemSelectionChanged.connect(self._on_select)
-        split.addWidget(self.table)
+        self.queue_tabs.addTab(self.table, "Held (0)")
+
+        self.sent_table = QTableWidget(0, len(SENT_COLUMNS))
+        self.sent_table.setHorizontalHeaderLabels(SENT_COLUMNS)
+        self.sent_table.verticalHeader().setVisible(False)
+        self.sent_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.sent_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.sent_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.sent_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.sent_table.itemSelectionChanged.connect(self._on_sent_select)
+        self.queue_tabs.addTab(self.sent_table, "Sent (0)")
+        split.addWidget(self.queue_tabs)
 
         mono = QFont("JetBrains Mono")
         mono.setStyleHint(QFont.Monospace)
@@ -387,6 +401,7 @@ class InterceptPanel(QWidget):
             return
         pending = self.queue.pending()
         self.header.setText(f"held: {len(pending)}")
+        self.queue_tabs.setTabText(0, f"Held ({len(pending)})")
         selected = self._current_id
         self.table.setRowCount(0)
         now = time.time()
@@ -637,6 +652,48 @@ class InterceptPanel(QWidget):
         self.counts_label.setText(
             f"session \u2014 sent {sent}  \u00b7  modified {st.get('modified', 0)}"
             f"  \u00b7  dropped {st.get('dropped', 0)}")
+        self._log_sent(action, pid, orig, work)
+
+    def _short_info(self, data: bytes) -> str:
+        try:
+            from scapy.layers.l2 import Ether
+            return scapy_tree.summarize(Ether(data)).info[:70]
+        except Exception:
+            return data[:40].decode("latin-1", "replace")
+
+    def _log_sent(self, action: str, pid: int, orig: bytes, work: bytes) -> None:
+        """Append a resolved packet to the Sent history so it is on the record."""
+        import time as _t
+        label = {"drop": "Dropped", "modify": "Modified", "forward": "Forwarded"}.get(action, action)
+        sent_bytes = None if action == "drop" else (work if action == "modify" else orig)
+        delta = ""
+        if action == "modify":
+            n = sum(1 for a, b in zip(orig, work) if a != b) + abs(len(work) - len(orig))
+            delta = str(n)
+        colors = {"drop": "#ff5c6c", "modify": "#4d9fff", "forward": "#3ddc97"}
+        info = self._short_info(sent_bytes if sent_bytes is not None else orig)
+        r = 0
+        self.sent_table.insertRow(0)
+        vals = [str(pid), label, info, delta, _t.strftime("%H:%M:%S")]
+        for c, v in enumerate(vals):
+            item = QTableWidgetItem(v)
+            if c == 1:
+                item.setForeground(QBrush(QColor(colors.get(action, "#8b93a7"))))
+            if c == 0 and sent_bytes is not None:
+                item.setData(Qt.UserRole, bytes(sent_bytes))   # inspectable
+            self.sent_table.setItem(r, c, item)
+        n_sent = self.sent_table.rowCount()
+        self.queue_tabs.setTabText(1, f"Sent ({n_sent})")
+
+    def _on_sent_select(self) -> None:
+        rows = self.sent_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        item = self.sent_table.item(rows[0].row(), 0)
+        data = item.data(Qt.UserRole) if item else None
+        if data:
+            self._current_id = None            # inspection only, not editing
+            self.set_original(bytes(data))
         self.refresh_pending()
 
     def _set_buttons_enabled(self, on: bool) -> None:

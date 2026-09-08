@@ -391,3 +391,38 @@ def test_pane_split_and_detach(app):
 
     pa.close_pane(pa.panes[1])
     assert len(pa.panes) == 1
+
+
+def test_intercept_sent_history(app):
+    from PySide6.QtCore import Qt
+    from reforge.core.intercept import InterceptQueue
+    from reforge.gui.intercept_panel import InterceptPanel
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+    from scapy.packet import Raw
+
+    panel = InterceptPanel()
+    q = InterceptQueue()
+    panel.set_queue(q)
+
+    def resolve(action, edit=None):
+        pkt = bytes(Ether() / IP(dst="10.0.0.2") / TCP(dport=80) / Raw(b"user=admin"))
+        q.hold("ifa", pkt, lambda o: None, flow_key=("f", id(pkt)))
+        panel.refresh_pending()
+        panel.table.selectRow(panel.table.rowCount() - 1)
+        panel._on_select()
+        if edit:
+            panel.view_combo.setCurrentText("ASCII")
+            panel.hex_edit.setPlainText(panel.hex_edit.toPlainText().replace("admin", edit))
+        panel._resolve(action)
+
+    resolve("modify", "guest")
+    resolve("forward")
+    resolve("drop")
+
+    assert panel.sent_table.rowCount() == 3
+    assert panel.queue_tabs.tabText(1) == "Sent (3)"
+    assert panel.sent_table.item(0, 1).text() == "Dropped"     # newest on top
+    assert panel.sent_table.item(2, 1).text() == "Modified"
+    assert panel.sent_table.item(2, 0).data(Qt.UserRole) is not None   # inspectable
+    assert panel.sent_table.item(0, 0).data(Qt.UserRole) is None       # dropped: no bytes
