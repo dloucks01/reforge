@@ -984,3 +984,66 @@ def test_gui_bridge_mode_rewrites_a_real_flow():
                 win.stop_capture()
             if server is not None:
                 server.terminate(); server.wait(timeout=3)
+
+
+def test_gui_bridge_harvests_credentials_into_the_panels():
+    """The passive-harvest pipeline through the real GUI: a login traverses the
+    GUI's userspace bridge, the _drain loop feeds each frame to the creds + recon
+    panels, and the harvested credential and hosts appear in them."""
+    from PySide6.QtWidgets import QApplication
+
+    from reforge.testlab.netlab import BridgeFlowLab
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+
+    server = win = None
+    with BridgeFlowLab() as lab:
+        try:
+            # a server that requires HTTP Basic auth (client sends creds regardless)
+            server = subprocess.Popen(
+                ["ip", "netns", "exec", lab["server_ns"], "python3", "-m", "http.server",
+                 "8000", "--bind", lab["server_ip"]],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.0)
+
+            from reforge.gui.main_window import MainWindow
+            win = MainWindow()
+            win.mode_combo.setCurrentText("Bridge")           # pass-through tap (unarmed)
+            for combo, iface in ((win.iface_combo, lab["port_a"]), (win.peer_combo, lab["port_b"])):
+                combo.addItem(iface); combo.setCurrentText(iface)
+            win.start_bridge()
+            assert win.service is not None
+            time.sleep(0.5)
+
+            result: dict = {}
+
+            def do_login():
+                r = netns_exec(lab["client_ns"], "curl", "-s", "-m", "8",
+                               "-u", "admin:s3cr3t",
+                               f"http://{lab['server_ip']}:8000/", "-o", "/dev/null",
+                               check=False)
+                result["done"] = r.returncode
+
+            t = threading.Thread(target=do_login, daemon=True); t.start()
+            harvested = False
+            for _ in range(80):
+                win._drain()
+                users = {c.get("username") for c in win.creds_panel.harvested_creds()}
+                if "admin" in users:
+                    harvested = True
+                    break
+                time.sleep(0.1)
+            t.join(timeout=5)
+
+            assert harvested, "the login credential was not harvested into the creds panel"
+            creds = win.creds_panel.harvested_creds()
+            assert any(c.get("kind") == "http-basic" and c.get("secret") == "s3cr3t"
+                       for c in creds)
+            hosts = {h["ip"] for h in win.recon_panel.host_dicts()}
+            assert lab["server_ip"] in hosts and lab["client_ip"] in hosts
+        finally:
+            if win is not None:
+                win.stop_capture()
+            if server is not None:
+                server.terminate(); server.wait(timeout=3)
