@@ -9,7 +9,6 @@ from scapy.layers.inet import IP, TCP
 from scapy.layers.l2 import Ether
 from scapy.utils import wrpcap
 
-from reforge.scenario.report import build_report
 from reforge.scenario.runner import ScenarioRunner, load_scenario
 
 

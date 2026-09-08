@@ -6,7 +6,7 @@ from reforge.capture.registry import list_backends
 from reforge.core.packet import Packet
 from reforge.core.pipeline import Pipeline
 from reforge.diagnostics.doctor import run_checks
-from reforge.rules.base import Action, Disposition, Match, Rule, Verdict
+from reforge.rules.base import Action, Disposition, Match, Rule
 from reforge.rules.engine import RuleEngine
 
 
