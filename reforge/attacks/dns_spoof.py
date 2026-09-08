@@ -38,9 +38,10 @@ def spoof_response(query_pkt, hostmap: dict[str, str], ttl: int = 300):
         return None
     dns = query_pkt[DNS]
     qd0 = _first(dns.qd)
-    if qd0 is None:
+    qname_raw = getattr(qd0, "qname", None)          # malformed question -> Raw, no qname
+    if qd0 is None or not qname_raw:
         return None
-    qname = qd0.qname.decode("latin-1") if isinstance(qd0.qname, bytes) else str(qd0.qname)
+    qname = qname_raw.decode("latin-1") if isinstance(qname_raw, bytes) else str(qname_raw)
     ip = _match(qname, hostmap)
     if not ip:
         return None
@@ -76,7 +77,10 @@ class DnsSpoofer:  # pragma: no cover (needs root + live traffic)
     def _on(self, pkt):
         from scapy.sendrecv import send
 
-        resp = spoof_response(pkt, self.hostmap)
+        try:
+            resp = spoof_response(pkt, self.hostmap)
+        except Exception:            # a hostile query must never kill the loop
+            return
         if resp is not None:
             send(resp, iface=self.iface, verbose=False)
             self.answered += 1

