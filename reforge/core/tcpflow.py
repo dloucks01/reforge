@@ -84,4 +84,23 @@ class TcpSeqFixer:
             # ack back to the original sender's coordinates by subtracting.
             tcp.ack = (tcp.ack - rev) & _MASK
             changed = True
+            # SACK blocks carry sequence numbers in that same reverse stream.
+            if tcp.options and self._fix_sack(tcp, rev):
+                changed = True
+        return changed
+
+    @staticmethod
+    def _fix_sack(tcp, rev: int) -> bool:
+        new_opts = []
+        changed = False
+        for name, val in tcp.options:
+            if name == "SAck" and isinstance(val, (tuple, list)) and val:
+                shifted = tuple((int(e) - rev) & _MASK for e in val)
+                new_opts.append((name, shifted))
+                if shifted != tuple(val):
+                    changed = True
+            else:
+                new_opts.append((name, val))
+        if changed:
+            tcp.options = new_opts
         return changed

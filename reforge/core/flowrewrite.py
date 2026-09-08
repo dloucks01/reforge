@@ -88,8 +88,31 @@ class FlowRewriter:
         # ACKs run the other way: the receiver acks positions in the *rewritten*
         # (grown/shrunk) reverse stream, but the original sender expects acks in
         # its own coordinates, so subtract the reverse-direction delta.
-        sack = self._shift(_rev_key(pkt), tcp.ack)
+        rkey = _rev_key(pkt)
+        sack = self._shift(rkey, tcp.ack)
         if sack:
             tcp.ack = (tcp.ack - sack) % _MOD
             changed = True
+        if self._fix_sack_edges(tcp, rkey):
+            changed = True
+        return changed
+
+    def _fix_sack_edges(self, tcp, rkey: tuple) -> bool:
+        """SACK blocks carry sequence numbers in the reverse stream too; convert
+        each edge to the original sender's coordinates like the ACK."""
+        opts = tcp.options
+        if not opts:
+            return False
+        changed = False
+        new_opts = []
+        for name, val in opts:
+            if name == "SAck" and isinstance(val, (tuple, list)) and val:
+                shifted = tuple((int(e) - self._shift(rkey, int(e))) % _MOD for e in val)
+                new_opts.append((name, shifted))
+                if shifted != tuple(val):
+                    changed = True
+            else:
+                new_opts.append((name, val))
+        if changed:
+            tcp.options = new_opts
         return changed

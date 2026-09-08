@@ -28,7 +28,7 @@ def test_define_and_use_custom_protocol():
         ],
         "bind": {"over": "UDP", "dport": 9999},
     }
-    cls = define_protocol(spec)
+    define_protocol(spec)
     # available in the builder now
     assert "MyProto" in builder.available_layers()
 
@@ -139,3 +139,13 @@ def test_tcpseqfixer_handles_ipv6():
     assert fx.apply(fwd) and fwd[TCP].seq == 1015
     rev = IPv6(src="fd00::1", dst="fd00::2") / TCP(sport=9, dport=80, ack=1015)
     assert fx.apply(rev) and rev[TCP].ack == 1010
+
+
+def test_tcpseqfixer_adjusts_sack_edges():
+    fx = TcpSeqFixer()
+    fx.note_length_change(IP(src="1.1.1.1", dst="2.2.2.2") / TCP(sport=1, dport=2, seq=1000), +4)
+    rev = IP(src="2.2.2.2", dst="1.1.1.1") / TCP(sport=2, dport=1, ack=1010,
+                                                 options=[("SAck", (2000, 2020))])
+    fx.apply(rev)
+    assert rev[TCP].ack == 1006
+    assert [v for k, v in rev[TCP].options if k == "SAck"] == [(1996, 2016)]

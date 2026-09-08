@@ -115,3 +115,28 @@ def test_flowrewrite_handles_ipv6_flows():
     assert fwd[TCP].seq == 1015                # later IPv6 segment shifted +5
     rev = a6(1015); fr.apply(rev)
     assert rev[TCP].ack == 1010                # reverse IPv6 ack converted down
+
+
+def test_sack_edges_converted_like_ack():
+    """SACK blocks carry sequence numbers in the reverse stream; a length-changing
+    edit must convert their edges to the sender's coordinates too, or a lossy flow
+    desyncs."""
+    fr = FlowRewriter()
+    fr.note_length_change(_fseg(1000), +3, orig_seq=1000)
+    # reverse ack carrying a SACK block whose edges are in grown coordinates
+    rev = _rseg(1011)
+    rev[TCP].options = [("SAck", (2000, 2010))]
+    fr.apply(rev)
+    assert rev[TCP].ack == 1008
+    sack = [v for k, v in rev[TCP].options if k == "SAck"]
+    assert sack == [(1997, 2007)]                 # edges converted down by 3
+    assert len(bytes(rev)) > 0                     # still serializes
+
+
+def test_sack_edges_before_edit_unchanged():
+    fr = FlowRewriter()
+    fr.note_length_change(_fseg(3000), +5, orig_seq=3000)
+    rev = _rseg(1000)
+    rev[TCP].options = [("SAck", (1500, 1600))]   # edges BEFORE the edit
+    fr.apply(rev)
+    assert [v for k, v in rev[TCP].options if k == "SAck"] == [(1500, 1600)]  # untouched
