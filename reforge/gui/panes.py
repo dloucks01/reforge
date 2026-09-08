@@ -93,6 +93,12 @@ class WorkspacePane(QFrame):
     def set_can_close(self, on: bool) -> None:
         self.btn_close.setVisible(on)
 
+    def set_active(self, on: bool) -> None:
+        for w in (self, self.head, self.title):
+            w.setProperty("active", "true" if on else "false")
+            w.style().unpolish(w)
+            w.style().polish(w)
+
 
 class _DetachWindow(QWidget):
     closed = Signal(str)
@@ -163,6 +169,10 @@ class PaneArea(QWidget):
         for p in self.panes:
             p.set_can_close(len(self.panes) > 1)
 
+    def _refresh_active(self) -> None:
+        for p in self.panes:
+            p.set_active(p is self.active)
+
     def _park_widget(self, w: QWidget) -> None:
         if w is not None:
             self._park.addWidget(w)  # reparents into the hidden park
@@ -174,30 +184,32 @@ class PaneArea(QWidget):
         return None
 
     def show_in(self, pane: WorkspacePane, key: str) -> None:
-        """Place workspace `key` into `pane`, pulling it from wherever it is."""
+        """Place workspace `key` into `pane`, pulling it from wherever it is.
+
+        If another pane already shows `key`, the two panes swap workspaces, so no
+        pane is ever left empty."""
         if pane.key == key:
             self.active = pane
+            self._refresh_active()
             self.active_changed.emit(key)
             return
-        # if it is detached, bring it back
-        if key in self._detached:
+        if key in self._detached:                    # bring it back from a window
             win = self._detached.pop(key)
-            w = win.take_widget()
+            self._park_widget(win.take_widget())
             win.close()
-            self._park_widget(w)
-        # if another pane shows it, that pane gives it up
+
+        cur_key = pane.key
+        cur_w = pane.take_content()
         other = self._pane_showing(key)
-        if other is not None and other is not pane:
-            self._park_widget(other.take_content())
-            other.set_content("__empty__", "—", QWidget())
-        # park what this pane currently holds
-        cur = pane.take_content()
-        if cur is not None and cur is not self.workspaces.get(pane.key):
-            cur.deleteLater()
-        elif cur is not None:
-            self._park_widget(cur)
+        if other is not None and other is not pane and cur_key in self.workspaces:
+            other.take_content()
+            other.set_content(cur_key, self.titles.get(cur_key, cur_key),
+                              self.workspaces[cur_key])   # swap
+        elif cur_w is not None:
+            self._park_widget(cur_w)                      # park what this pane had
         pane.set_content(key, self.titles.get(key, key), self.workspaces[key])
         self.active = pane
+        self._refresh_active()
         self.active_changed.emit(key)
 
     def set_active_workspace(self, key: str) -> None:
@@ -224,6 +236,7 @@ class PaneArea(QWidget):
         pane.deleteLater()
         self.active = self.panes[0]
         self._sync_close_buttons()
+        self._refresh_active()
 
     def detach(self, key: str | None) -> None:
         if not key or key in self._detached:
@@ -253,6 +266,7 @@ class PaneArea(QWidget):
 
     def _on_pane_activated(self, pane: WorkspacePane) -> None:
         self.active = pane
+        self._refresh_active()
         if pane.key:
             self.active_changed.emit(pane.key)
 

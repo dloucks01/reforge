@@ -190,7 +190,8 @@ class InterceptPanel(QWidget):
         mbox = QWidget()
         mb = QVBoxLayout(mbox); mb.setContentsMargins(0, 0, 0, 0); mb.setSpacing(2)
         mrow = QHBoxLayout(); mrow.setContentsMargins(0, 0, 0, 0)
-        mrow.addWidget(self._section("Modified \u2014 editable"))
+        self._mod_label = self._section("Modified \u2014 editable")
+        mrow.addWidget(self._mod_label)
         mrow.addStretch(1)
         mrow.addWidget(QLabel("Raw:"))
         self.view_combo = QComboBox()
@@ -257,29 +258,39 @@ class InterceptPanel(QWidget):
 
     def _section(self, text: str) -> QLabel:
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: palette(mid); font-size: 10px; font-weight: 600; "
-                          "letter-spacing: 0.05em;")
+        lbl.setObjectName("regionLabel")
         return lbl
 
     def set_original(self, data: bytes) -> None:
-        """Show a packet in the read-only Original view (inspection + intercept)."""
-        if not data:
-            self.orig_tree.clear()
+        """Show a packet in the read-only Original view (inspection + intercept).
+
+        The hex is rendered in the same view (hex/ASCII) as the Modified pane so
+        the two align and their diff can be colour-coded."""
+        self._orig_bytes = bytes(data)
+        self.orig_tree.clear()
+        if data:
+            try:
+                from scapy.layers.l2 import Ether
+
+                for layer in scapy_tree.to_tree(Ether(data)):
+                    parent = QTreeWidgetItem([layer.name, ""])
+                    for f in layer.fields:
+                        parent.addChild(QTreeWidgetItem([f.name, f.human]))
+                    self.orig_tree.addTopLevelItem(parent)
+                    parent.setExpanded(True)
+            except Exception:
+                pass
+        self._render_original()
+
+    def _render_original(self) -> None:
+        d = self._orig_bytes
+        if not d:
             self.orig_hex.clear()
             return
-        self.orig_hex.setPlainText("\n".join(scapy_tree.hexdump_lines(data)))
-        self.orig_tree.clear()
-        try:
-            from scapy.layers.l2 import Ether
-
-            for layer in scapy_tree.to_tree(Ether(data)):
-                parent = QTreeWidgetItem([layer.name, ""])
-                for f in layer.fields:
-                    parent.addChild(QTreeWidgetItem([f.name, f.human]))
-                self.orig_tree.addTopLevelItem(parent)
-                parent.setExpanded(True)
-        except Exception:
-            pass
+        if self._view == "hex":
+            self.orig_hex.setPlainText(" ".join(f"{b:02x}" for b in d))
+        else:
+            self.orig_hex.setPlainText(d.decode("latin-1").replace("\r\n", "\n").replace("\r", "\n"))
 
     # ---- intercept filter / search -----------------------------------------
     def set_transform_count(self, n: int) -> None:
@@ -444,33 +455,60 @@ class InterceptPanel(QWidget):
         if not self._applying:
             self._refresh_diff()
 
+    def _editor_bytes(self) -> bytes | None:
+        """Parse the current editor to bytes without mutating the working copy."""
+        if self._view == "hex":
+            toks = self.hex_edit.toPlainText().replace(":", " ").split()
+            try:
+                return bytes(int(t, 16) for t in toks)
+            except ValueError:
+                return None
+        text = self.hex_edit.toPlainText()
+        if self._current_kind == "message":
+            text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+        return text.encode("latin-1", "ignore")
+
+    @staticmethod
+    def _sel(doc, a, b, fmt):
+        cur = QTextCursor(doc)
+        cur.setPosition(a)
+        cur.setPosition(b, QTextCursor.KeepAnchor)
+        sel = QTextEdit.ExtraSelection()
+        sel.cursor = cur
+        sel.format = fmt
+        return sel
+
     def _refresh_diff(self) -> None:
-        """Highlight the regions of the Modified editor that differ from Original."""
+        """Green = added/changed in Modified; red = removed/changed in Original."""
         import difflib
 
         if self._current_id is None or not self._orig_bytes:
             self.hex_edit.setExtraSelections([])
+            self.orig_hex.setExtraSelections([])
+            self._mod_label.setText("Modified \u2014 editable")
             return
-        if self._view == "hex":
-            orig = " ".join(f"{b:02x}" for b in self._orig_bytes)
-        else:
-            orig = self._orig_bytes.decode("latin-1").replace("\r\n", "\n").replace("\r", "\n")
+        orig = self.orig_hex.toPlainText()
         mod = self.hex_edit.toPlainText()
-        fmt = QTextCharFormat()
-        fmt.setBackground(QColor(60, 200, 120, 70))     # subtle green = added/changed
-        doc = self.hex_edit.document()
-        sels = []
-        for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(
+        green = QTextCharFormat(); green.setBackground(QColor(60, 200, 120, 80))
+        red = QTextCharFormat(); red.setBackground(QColor(255, 92, 108, 70))
+        gsel, rsel = [], []
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
                 None, orig, mod, autojunk=False).get_opcodes():
             if tag in ("replace", "insert") and j2 > j1:
-                cur = QTextCursor(doc)
-                cur.setPosition(j1)
-                cur.setPosition(j2, QTextCursor.KeepAnchor)
-                sel = QTextEdit.ExtraSelection()
-                sel.cursor = cur
-                sel.format = fmt
-                sels.append(sel)
-        self.hex_edit.setExtraSelections(sels)
+                gsel.append(self._sel(self.hex_edit.document(), j1, j2, green))
+            if tag in ("replace", "delete") and i2 > i1:
+                rsel.append(self._sel(self.orig_hex.document(), i1, i2, red))
+        self.hex_edit.setExtraSelections(gsel)
+        self.orig_hex.setExtraSelections(rsel)
+        mb = self._editor_bytes()
+        if mb is None:
+            self._mod_label.setText("Modified \u2014 editable")
+            return
+        changed = sum(1 for a, b in zip(self._orig_bytes, mb) if a != b)
+        changed += abs(len(mb) - len(self._orig_bytes))
+        self._mod_label.setText(
+            f"Modified \u2014 editable   \u00b7  {changed} byte{'s' if changed != 1 else ''} changed"
+            if changed else "Modified \u2014 editable")
 
     def _sync_from_editor(self) -> bool:
         """Parse the editor content (per view) into the working bytes.
@@ -496,6 +534,7 @@ class InterceptPanel(QWidget):
         self._sync_from_editor()                # keep edits made in the old view
         self._view = "ascii" if label == "ASCII" else "hex"
         self._applying = True
+        self._render_original()
         self._render_editor()
         self._applying = False
         self._refresh_diff()

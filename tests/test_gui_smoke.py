@@ -43,7 +43,8 @@ def test_window_builds_and_appends(app):
     win._on_select()
     ip = win.intercept_panel  # selection feeds the intercept panel's Original view
     assert ip.orig_tree.topLevelItemCount() >= 3      # Ether/IP/TCP
-    assert ip.orig_hex.toPlainText().startswith("00000000")
+    import re
+    assert re.match(r"^[0-9a-f]{2}( [0-9a-f]{2})+", ip.orig_hex.toPlainText())  # hex tokens
     win.close()
 
 

@@ -363,12 +363,23 @@ class MainWindow(QMainWindow):
         row.addWidget(q)
         return h
 
+    def _region_label(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setObjectName("regionLabel")
+        return lbl
+
     def _ws_live(self) -> QWidget:
+        stream = QWidget()
+        sv = QVBoxLayout(stream)
+        sv.setContentsMargins(0, 0, 0, 0)
+        sv.setSpacing(2)
+        sv.addWidget(self._region_label("TRAFFIC STREAM"))
+        sv.addWidget(self.table, 1)
         lower = QTabWidget()
         lower.addTab(self.intercept_panel, "Intercept")
         lower.addTab(self.rules_panel, "Rules")
         outer = QSplitter(Qt.Vertical)
-        outer.addWidget(self.table)
+        outer.addWidget(stream)
         outer.addWidget(lower)
         outer.setSizes([260, 560])
         return self._ws("live", outer)

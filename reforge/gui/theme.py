@@ -268,6 +268,13 @@ QTabWidget::pane {{ border: 1px solid {p['BORDER']}; border-radius: 6px; top: -1
 #paneTitle {{ color: {p['TEXT']}; font-weight: 700; font-size: 11.5px; }}
 #paneBtn {{ background: transparent; border: none; color: {p['TEXT_MUTED']}; padding: 1px 6px; font-size: 13px; }}
 #paneBtn:hover {{ background: {p['BG_ELEV2']}; color: {p['TEXT']}; border-radius: 4px; }}
+#paneHead[active="true"] {{ background: {p['ACCENT_DIM']}; border-bottom: 1px solid {p['ACCENT']}; }}
+#paneTitle[active="true"] {{ color: {p['ACCENT']}; }}
+
+#regionLabel {{
+    color: {p['TEXT']}; font-weight: 700; font-size: 9.5px; letter-spacing: 0.07em;
+    padding: 3px 6px 3px 8px; border-left: 3px solid {p['ACCENT']}; background: {p['BG_ELEV']};
+}}
 """
 
 
