@@ -476,3 +476,20 @@ def test_send_to_builder(app):
     assert win.pane_area.current_key() == "craft"      # jumped to the Builder
     built = win.builder_panel._current_bytes()
     assert built is not None and len(built) >= len(pkt) - 4
+
+
+def test_flows_view(app):
+    from reforge.capture.base import Frame
+    from reforge.gui.main_window import MainWindow
+    from reforge.testlab import traffic as T
+
+    win = MainWindow()
+    for ts, data in T.mixed_scenario():
+        win._append_row(ts, Frame(data=data, ingress="lab0"))
+    assert win.flows.count() == 5
+    win._live_top.setCurrentIndex(1)               # Flows tab
+    win._refresh_flows()
+    assert win.flows_table.rowCount() == 5
+    win._on_flow_activated(win.flows_table.item(0, 0))   # drill into the stream
+    assert win._live_top.currentIndex() == 0
+    assert win.table.selectionModel().selectedRows()

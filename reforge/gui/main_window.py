@@ -41,6 +41,7 @@ from reforge.capture.pcap import PcapFileBackend, export_pcap
 from reforge.capture.registry import list_interfaces
 from reforge.constants import APP_NAME, TAGLINE, VERSION
 from reforge.core.capture_service import CaptureService
+from reforge.core.flows import FlowTracker
 from reforge.core.intercept import InterceptQueue
 from reforge.core.packet import Packet
 from reforge.dissect import scapy_tree
@@ -63,6 +64,7 @@ from reforge.gui.scenario_panel import ScenarioPanel
 log = logging.getLogger("reforge.gui")
 
 COLUMNS = ["No.", "Time", "Source", "Destination", "Proto", "Length", "Info"]
+FLOW_COLS = ["Proto", "Conversation", "Pkts", "Bytes", "State", "Duration"]
 
 
 _WS_BLURB = {
@@ -87,6 +89,7 @@ class MainWindow(QMainWindow):
         self._intercept_filter: tuple | None = None  # (match, text) to hold
         self._transforms: list = []                   # persistent promoted rewrite rules
         self.packets: list[tuple[float, Frame]] = []  # captured (ts, frame)
+        self.flows = FlowTracker()
         self._t0: float | None = None
 
         self._mono_small = QFont("JetBrains Mono", 11)
@@ -394,20 +397,71 @@ class MainWindow(QMainWindow):
         return lbl
 
     def _ws_live(self) -> QWidget:
+        # top: Stream (raw packets) | Flows (conversations)
+        self._live_top = QTabWidget()
         stream = QWidget()
-        sv = QVBoxLayout(stream)
-        sv.setContentsMargins(0, 0, 0, 0)
-        sv.setSpacing(2)
-        sv.addWidget(self._region_label("LIVE STREAM"))
-        sv.addWidget(self.table, 1)
+        sv = QVBoxLayout(stream); sv.setContentsMargins(0, 0, 0, 0); sv.setSpacing(0)
+        sv.addWidget(self.table)
+        self._live_top.addTab(stream, "Stream")
+
+        self.flows_table = QTableWidget(0, len(FLOW_COLS))
+        self.flows_table.setHorizontalHeaderLabels(FLOW_COLS)
+        self.flows_table.verticalHeader().setVisible(False)
+        self.flows_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.flows_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.flows_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.flows_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.flows_table.itemDoubleClicked.connect(self._on_flow_activated)
+        self._live_top.addTab(self.flows_table, "Flows")
+
         lower = QTabWidget()
         lower.addTab(self.intercept_panel, "Intercept")
         lower.addTab(self.rules_panel, "Rules")
         outer = QSplitter(Qt.Vertical)
-        outer.addWidget(stream)
+        outer.addWidget(self._live_top)
         outer.addWidget(lower)
         outer.setSizes([260, 560])
         return self._ws("live", outer)
+
+    def _refresh_flows(self) -> None:
+        if not hasattr(self, "flows_table"):
+            return
+        self._live_top.setTabText(1, f"Flows ({self.flows.count()})")
+        if self._live_top.currentIndex() != 1:
+            return                                    # only repaint when the Flows tab is visible
+        flows = self.flows.flows()
+        self.flows_table.setRowCount(0)
+        for f in flows:
+            r = self.flows_table.rowCount(); self.flows_table.insertRow(r)
+            vals = [f.proto, f.endpoints, str(f.packets), str(f.bytes),
+                    f.state, f"{f.duration:.2f}s"]
+            for c, v in enumerate(vals):
+                item = QTableWidgetItem(v)
+                item.setToolTip(v)
+                if c == 0:
+                    item.setForeground(QBrush(QColor(theme.proto_color(f.proto))))
+                    item.setData(Qt.UserRole, (f.a_ip, f.a_port, f.b_ip, f.b_port))
+                self.flows_table.setItem(r, c, item)
+
+    def _on_flow_activated(self, item) -> None:
+        """Double-click a flow -> jump to the Stream tab and select its first packet."""
+        from reforge.core.flows import _dissect
+
+        key = self.flows_table.item(item.row(), 0).data(Qt.UserRole)
+        if not key:
+            return
+        aip, ap, bip, bp = key
+        ends = {(aip, ap), (bip, bp)}
+        for i, (_ts, frame) in enumerate(self.packets):
+            try:
+                info = _dissect(frame.data)
+            except Exception:
+                info = None
+            if info and {(info[1], info[2]), (info[3], info[4])} == ends:
+                self._live_top.setCurrentIndex(0)     # Stream tab
+                self.table.selectRow(i)
+                self.table.scrollToItem(self.table.item(i, 0))
+                break
 
     def _ws_recon(self) -> QWidget:
         bottom = QSplitter(Qt.Horizontal)
@@ -707,6 +761,9 @@ class MainWindow(QMainWindow):
 
     def clear(self) -> None:
         self.table.setRowCount(0)
+        self.flows.clear()
+        if hasattr(self, "flows_table"):
+            self.flows_table.setRowCount(0)
         self.intercept_panel.set_original(b"")
         self.packets.clear()
         self._t0 = None
@@ -734,6 +791,7 @@ class MainWindow(QMainWindow):
             self.intercept_panel.refresh_pending()
         self.diag_panel.refresh_health()
         self.recon_panel.refresh()
+        self._refresh_flows()
         n = self._flush_rows()
         if n == 0 and not self.service.running:
             err = getattr(self.service, "error", None)
@@ -781,6 +839,7 @@ class MainWindow(QMainWindow):
 
         idx = len(self.packets)
         self.packets.append((ts, frame))
+        self.flows.observe(ts, frame.data)
         if self._t0 is None:
             self._t0 = ts
         try:
