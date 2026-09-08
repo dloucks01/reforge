@@ -52,7 +52,7 @@ def test_parsers_never_raise_on_dissectable_fuzz():
             b[rng.randrange(len(b))] = rng.randrange(256)
         try:
             pkts.append(Ether(bytes(b)))
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - fuzz corpus
             pass
 
     ce, inv = CredentialExtractor(), AssetInventory()
@@ -64,3 +64,37 @@ def test_parsers_never_raise_on_dissectable_fuzz():
         inv.observe(p)
         os_from_syn(p)
         service_from_packet(p)
+
+
+def test_dhcp_parse_request_never_raises_on_fuzz():
+    from reforge.attacks import dhcp
+    rng = random.Random(4)
+    base = bytes(dhcp.build_discover("02:aa:bb:cc:dd:ee", xid=0x99))
+    pkts = []
+    for _ in range(400):
+        b = bytearray(base)
+        for _ in range(rng.randint(1, 8)):
+            b[rng.randrange(len(b))] = rng.randrange(256)
+        try:
+            pkts.append(Ether(bytes(b)))
+        except Exception:  # noqa: BLE001, S110 - fuzz corpus
+            pass
+    for p in pkts:
+        dhcp.parse_request(p)            # must return (mac,xid,type) or None, never raise
+
+
+def test_stream_harvester_and_msg_intercept_never_raise():
+    from reforge.attacks.msg_intercept import MessageInterceptor
+    from reforge.attacks.stream_harvester import StreamHarvester
+    from reforge.core.intercept import InterceptQueue
+
+    sh = StreamHarvester()
+    mi = MessageInterceptor(InterceptQueue(), keyword="password")
+    good = bytes(Ether() / IP() / TCP(dport=80) / __import__("scapy.packet", fromlist=["Raw"]).Raw(
+        b"POST /login HTTP/1.1\r\nAuthorization: Basic YWRtaW46cA==\r\n\r\n"))
+    corpus = [os.urandom(random.Random(5).randint(0, 100)) for _ in range(200)]
+    corpus += [good[:c] for c in range(0, len(good), 5)] + [b"", b"\xff" * 1500]
+    for b in corpus:
+        sh.add_frame(b)
+        mi.process(b, True, ("f", 1))
+        mi.should_hold(b, True)

@@ -122,7 +122,10 @@ class RogueDhcp:  # pragma: no cover (needs root)
     def _on(self, pkt):
         from scapy.sendrecv import sendp
 
-        parsed = parse_request(pkt)
+        try:
+            parsed = parse_request(pkt)
+        except Exception:            # a malformed DHCP packet must never kill the loop
+            return
         if not parsed:
             return
         mac, xid, mtype = parsed
