@@ -149,6 +149,11 @@ def up_segment_lab() -> dict:
                check=False)
     netns_exec("rf-victim", "ip", "-6", "route", "replace", "default", "via", SEG_GW6,
                check=False)
+    # A MITM relays victim<->gateway by IP forwarding, but many hosts (Docker,
+    # firewalld) ship a FORWARD policy of DROP and strict rp_filter that would
+    # silently kill the relayed traffic. Permit forwarding for the lab subnet so
+    # an end-to-end MITM actually delivers.
+    _seg_forwarding(add=True)
     return {
         "bridge": SEG_BRIDGE, "attacker": atk,
         "attacker_ip4": atk4.split("/")[0], "attacker_ip6": atk6.split("/")[0],
@@ -161,7 +166,23 @@ def _in_ns(ns: str, iface: str) -> bool:
     return netns_exec(ns, "ip", "link", "show", iface, check=False).returncode == 0
 
 
+SEG_SUBNET4 = "10.9.9.0/24"
+
+
+def _seg_forwarding(add: bool) -> None:
+    """Allow (or remove) FORWARD-chain relaying for the lab subnet, and relax
+    rp_filter / redirects that would otherwise drop same-segment MITM traffic."""
+    flag = "-I" if add else "-D"
+    for spec in (["-s", SEG_SUBNET4], ["-d", SEG_SUBNET4]):
+        _run("iptables", flag, "FORWARD", *spec, "-j", "ACCEPT", check=False)
+    if add:
+        for k in ("all", "default", SEG_ATTACKER[0]):
+            _run("sysctl", "-w", f"net.ipv4.conf.{k}.rp_filter=0", check=False)
+            _run("sysctl", "-w", f"net.ipv4.conf.{k}.send_redirects=0", check=False)
+
+
 def down_segment_lab() -> None:
+    _seg_forwarding(add=False)
     for ns, _h, bveth, _4, _6 in SEG_HOSTS:
         if ns_exists(ns):
             subprocess.run(["ip", "netns", "del", ns], capture_output=True, check=False)
