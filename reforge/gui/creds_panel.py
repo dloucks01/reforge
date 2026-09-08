@@ -82,6 +82,7 @@ class CredsPanel(QWidget):
     def clear(self) -> None:
         self.table.setRowCount(0)
         self._seen.clear()
+        self.harvested.clear()          # keep the report list in sync with the view
         self.extractor = CredentialExtractor()
         self.stream = StreamHarvester()
         self.count.setText("Credentials harvested: 0")

@@ -43,3 +43,14 @@ def test_build_response_ttls_differ_llmnr_vs_mdns():
 
 def test_build_response_none_for_ordinary_dns():
     assert N.build_response(IP() / UDP(dport=53) / DNS(qd=DNSQR(qname="x")), "1.1.1.1") is None
+
+
+def test_nbtns_query_detected_and_response_safe():
+    from scapy.layers.netbios import NBNSQueryRequest
+    q = IP(src="10.0.0.50", dst="10.0.0.255") / UDP(sport=50000, dport=137) / \
+        NBNSQueryRequest(QUESTION_NAME="FILESERVER")
+    name = N.queried_name(q)
+    assert name is not None and "FILESERVER" in name.upper()   # NBT-NS query detected
+    # response crafting must never raise (returns a response or None on this stack)
+    resp = N.build_response(q, "10.0.0.66")
+    assert resp is None or resp[UDP].sport == 137
