@@ -714,3 +714,63 @@ def test_watchdog_fail_open_restores_the_wire_when_the_bridge_dies():
             from reforge.privhelper.netconfig import FAIL_BRIDGE
             subprocess.run(["ip", "link", "del", FAIL_BRIDGE],
                            capture_output=True, check=False)
+
+
+def test_ipv6_length_changing_edit_stays_in_sync():
+    """seq/ack fix-up over IPv6: grow the first of two server segments on an IPv6
+    TCP flow through the bridge; both the grown first and the intact second reach
+    the client (regression guard for the IPv4-only flow-key crash)."""
+    import textwrap
+
+    from reforge.core.bridge import UserspaceBridge
+    from reforge.rules.actions import PayloadReplace
+    from reforge.rules.base import Rule
+    from reforge.rules.engine import RuleEngine
+    from reforge.rules.filter import parse_filter
+    from reforge.testlab.netlab import BridgeFlowLab
+
+    server = bridge = None
+    with BridgeFlowLab() as lab:
+        try:
+            srv_code = textwrap.dedent(f'''
+                import socket, time
+                s = socket.socket(socket.AF_INET6)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(("{lab['server_ip6']}", 9099)); s.listen(1)
+                c, _ = s.accept()
+                c.sendall(b"FIRST:SHORT-X\\n"); time.sleep(0.3)
+                c.sendall(b"SECOND-PART-INTACT\\n"); time.sleep(0.2); c.close()
+            ''')
+            server = subprocess.Popen(
+                ["ip", "netns", "exec", lab["server_ns"], "python3", "-c", srv_code],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(0.5)
+
+            engine = RuleEngine([Rule("grow", parse_filter('Raw.load contains "SHORT-X"'),
+                                      [PayloadReplace(b"SHORT-X", b"MUCH-LONGER-REPLACEMENT")])])
+            bridge = UserspaceBridge(lab["port_a"], lab["port_b"], engine, armed=True,
+                                     flow_rewrite=True)
+            bridge.start(); bridge.wait_ready(5.0)
+
+            cli_code = textwrap.dedent(f'''
+                import socket, sys
+                s = socket.socket(socket.AF_INET6); s.settimeout(6)
+                s.connect(("{lab['server_ip6']}", 9099))
+                buf = b""
+                try:
+                    while True:
+                        d = s.recv(4096)
+                        if not d: break
+                        buf += d
+                except Exception: pass
+                sys.stdout.write(buf.decode("latin-1"))
+            ''')
+            got = netns_exec(lab["client_ns"], "python3", "-c", cli_code, check=False).stdout
+            assert "MUCH-LONGER-REPLACEMENT" in got, f"IPv6 edit not delivered: {got!r}"
+            assert "SECOND-PART-INTACT" in got, f"IPv6 seq-fixup lost the 2nd segment: {got!r}"
+            assert bridge.counters.errors == 0
+        finally:
+            if bridge is not None:
+                bridge.stop()
+            if server is not None:
+                server.terminate(); server.wait(timeout=3)

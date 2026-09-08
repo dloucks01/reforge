@@ -232,6 +232,7 @@ BRIDGE_FLOW = {
     "client_veth": "bf-c", "client_br": "bf-c-br",
     "server_veth": "bf-s", "server_br": "bf-s-br",
     "client_ip": "10.8.8.1", "server_ip": "10.8.8.2", "prefix": "/24",
+    "client_ip6": "fd08::1", "server_ip6": "fd08::2", "prefix6": "/64",
     "port_a": "bf-c-br", "port_b": "bf-s-br",
 }
 _BF_OFFLOADS = ["tx", "rx", "gso", "tso", "gro", "sg"]
@@ -242,9 +243,9 @@ def up_bridge_flow_lab() -> dict:
     for nsn in (bf["client_ns"], bf["server_ns"]):
         if not ns_exists(nsn):
             _run("ip", "netns", "add", nsn)
-    pairs = ((bf["client_veth"], bf["client_br"], bf["client_ns"], bf["client_ip"]),
-             (bf["server_veth"], bf["server_br"], bf["server_ns"], bf["server_ip"]))
-    for veth, bveth, nsn, ip in pairs:
+    pairs = ((bf["client_veth"], bf["client_br"], bf["client_ns"], bf["client_ip"], bf["client_ip6"]),
+             (bf["server_veth"], bf["server_br"], bf["server_ns"], bf["server_ip"], bf["server_ip6"]))
+    for veth, bveth, nsn, ip, ip6 in pairs:
         if not iface_exists(bveth) and not _in_ns(nsn, veth):
             _run("ip", "link", "add", veth, "type", "veth", "peer", "name", bveth)
         _run("ip", "link", "set", veth, "netns", nsn, check=False)
@@ -252,8 +253,10 @@ def up_bridge_flow_lab() -> dict:
         for feat in _BF_OFFLOADS:               # bridge-side veth: offloads off
             _run("ethtool", "-K", bveth, feat, "off", check=False)
         netns_exec(nsn, "ip", "link", "set", "lo", "up", check=False)
+        netns_exec(nsn, "sysctl", "-w", f"net.ipv6.conf.{veth}.accept_dad=0", check=False)
         netns_exec(nsn, "ip", "link", "set", veth, "up", check=False)
         netns_exec(nsn, "ip", "addr", "replace", ip + bf["prefix"], "dev", veth, check=False)
+        netns_exec(nsn, "ip", "-6", "addr", "replace", ip6 + bf["prefix6"], "dev", veth, check=False)
         for feat in _BF_OFFLOADS:               # host-side veth: offloads off too
             netns_exec(nsn, "ethtool", "-K", veth, feat, "off", check=False)
     return dict(bf)
