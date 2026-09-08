@@ -10,8 +10,9 @@ Model: per directional 4-tuple (src_ip, sport, dst_ip, dport) we track the
 cumulative byte delta we've introduced in that direction. For any packet:
   - shift SEQ by the delta accumulated in the SAME direction (bytes we added
     before this segment's data), and
-  - shift ACK by the delta accumulated in the REVERSE direction (extra bytes the
-    peer has now received from us).
+  - shift ACK down by the delta accumulated in the REVERSE direction: the peer
+    acks positions in the stream we grew/shrank, so convert its ack back to the
+    original sender's coordinates.
 """
 
 from __future__ import annotations
@@ -76,6 +77,8 @@ class TcpSeqFixer:
             changed = True
         rev = self.deltas.get(_rev_key(pkt), 0)
         if rev:
-            tcp.ack = (tcp.ack + rev) & _MASK
+            # the peer acks positions in the stream we grew/shrank; convert its
+            # ack back to the original sender's coordinates by subtracting.
+            tcp.ack = (tcp.ack - rev) & _MASK
             changed = True
         return changed

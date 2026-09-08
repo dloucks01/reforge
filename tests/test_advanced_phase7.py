@@ -115,10 +115,11 @@ def test_seq_ack_fixups_after_length_change():
     assert fixer.apply(a2)
     assert a2[TCP].seq == 1015
 
-    # Reverse segment acking our data: ack=1010 -> must become 1015.
+    # Reverse segment acking our grown data: the peer acks in grown coordinates
+    # (ack=1010), converted DOWN to the sender's coordinates (1005).
     b1 = IP(src="10.0.0.2", dst="10.0.0.1") / TCP(sport=2000, dport=1000, ack=1010)
     assert fixer.apply(b1)
-    assert b1[TCP].ack == 1015
+    assert b1[TCP].ack == 1005
 
 
 def test_seq_fixer_wraps_32bit():

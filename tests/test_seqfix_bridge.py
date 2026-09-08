@@ -36,11 +36,12 @@ def test_bridge_seqfix_shifts_later_seq_and_reverse_ack():
     p2 = Ether(br.process_frame("ethA", a2)[0])
     assert p2[TCP].seq == 1010
 
-    # Reverse segment acking our data: ack 1005 -> 1010 (+5).
+    # Reverse segment acking our grown data: the peer received 10 bytes and acks
+    # 1010 (grown coordinates); convert DOWN to the sender's 1005.
     b1 = bytes(Ether() / IP(src="10.0.0.2", dst="10.0.0.1")
-               / TCP(sport=80, dport=1111, ack=1005))
+               / TCP(sport=80, dport=1111, ack=1010))
     pb = Ether(br.process_frame("ethB", b1)[0])
-    assert pb[TCP].ack == 1010
+    assert pb[TCP].ack == 1005
 
 
 def test_bridge_seqfix_off_leaves_seq_untouched():
