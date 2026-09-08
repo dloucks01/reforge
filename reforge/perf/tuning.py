@@ -65,7 +65,7 @@ def tuning_plan(iface: str, backend: str) -> list[str]:
     """Human-readable tuning steps for a backend/interface."""
     plan = [f"Disable NIC offloads on {iface} (Reforge does this in bridge prep).",
             irq_affinity_hint(iface),
-            f"Pin the capture/forward threads to isolated cores (taskset -pc).",]
+            "Pin the capture/forward threads to isolated cores (taskset -pc).",]
     if backend in ("pf_ring", "dpdk"):
         plan.append(f"Raise NIC queues: ethtool -L {iface} combined <ncores>.")
     if backend == "dpdk":
