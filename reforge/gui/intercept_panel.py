@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -56,6 +57,7 @@ class InterceptPanel(QWidget):
         self.queue = None
         self._current_id: int | None = None
         self._work: bytes = b""
+        self._orig_bytes: bytes = b""
         self._current_kind = "packet"
         self._view = "hex"                 # raw editor view: "hex" | "ascii"
         self._applying = False
@@ -71,84 +73,78 @@ class InterceptPanel(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
 
-        # --- intercept filter bar: which packets to catch -------------------
-        fbar = QHBoxLayout()
-        self.preset_combo = QComboBox()
-        self.preset_combo.addItem("Presets…")
-        for label, _flt, _lim in _PRESETS:
-            self.preset_combo.addItem(label)
-        self.preset_combo.setToolTip("Fill the filter with a common recipe")
-        self.preset_combo.activated.connect(self._apply_preset)
+        # --- catch strip: enable + filter + presets (one compact row) -------
+        fbar = QHBoxLayout(); fbar.setSpacing(5)
         self.enable_check = QCheckBox("Intercept")
         self.enable_check.setToolTip("Hold matching packets for edit; others pass through")
         self.enable_check.toggled.connect(self._apply_filter)
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText(
-            'catch filter, e.g.  TCP.dport == 80 and Raw.load contains "login"')
+            'catch filter \u2014 TCP.dport == 80 and Raw.load contains "login"')
         self.filter_edit.setToolTip(filter_help_tooltip())
         self.filter_edit.returnPressed.connect(self._apply_filter)
         btn_apply = QPushButton("Apply"); btn_apply.clicked.connect(self._apply_filter)
-        btn_help = QPushButton("?"); btn_help.setMaximumWidth(28)
+        btn_help = QPushButton("?"); btn_help.setMaximumWidth(24)
         btn_help.setToolTip("Filter syntax help")
         btn_help.clicked.connect(lambda: self.on_help() if self.on_help else None)
-        fbar.addWidget(self.preset_combo)
-        fbar.addWidget(self.enable_check)
-        fbar.addWidget(self.filter_edit, 1)
-        fbar.addWidget(btn_apply)
-        fbar.addWidget(btn_help)
+        self.preset_combo = QComboBox(); self.preset_combo.addItem("Presets\u2026")
+        for label, _flt, _lim in _PRESETS:
+            self.preset_combo.addItem(label)
+        self.preset_combo.setToolTip("Fill the filter with a common recipe")
+        self.preset_combo.activated.connect(self._apply_preset)
+        for wdg in (self.enable_check, self.filter_edit, btn_apply, btn_help, self.preset_combo):
+            fbar.addWidget(wdg)
+        fbar.setStretchFactor(self.filter_edit, 1)
         root.addLayout(fbar)
 
-        # --- volume safeguards: never drown the queue or stall the wire -----
-        vbar = QHBoxLayout()
-        vbar.addWidget(QLabel("Hold at most:"))
+        # --- compact status + limits + search (one row) ---------------------
+        obar = QHBoxLayout(); obar.setSpacing(6)
+        self.filter_status = QLabel("Intercept off \u2014 all traffic passes through.")
+        self.filter_status.setStyleSheet("color: palette(mid);")
+        obar.addWidget(self.filter_status)
+        obar.addStretch(1)
+        self.header = QLabel("held: 0")
+        self.header.setStyleSheet("font-weight: 700;")
+        obar.addWidget(self.header)
+        obar.addWidget(self._dim("hold"))
         self.limit_spin = QSpinBox(); self.limit_spin.setRange(0, 100000)
-        self.limit_spin.setValue(20); self.limit_spin.setSpecialValueText("∞")
+        self.limit_spin.setValue(20); self.limit_spin.setSpecialValueText("\u221e")
+        self.limit_spin.setMaximumWidth(62)
         self.limit_spin.setToolTip("Max packets held at once (0 = unlimited). "
                                    "Extra matches auto-resolve instead of piling up.")
         self.limit_spin.valueChanged.connect(self._push_queue_config)
-        vbar.addWidget(self.limit_spin)
-        vbar.addWidget(QLabel("  Auto-release after:"))
+        obar.addWidget(self.limit_spin)
+        obar.addWidget(self._dim("release"))
         self.autorel_spin = QSpinBox(); self.autorel_spin.setRange(0, 3600)
-        self.autorel_spin.setSuffix(" s"); self.autorel_spin.setValue(0)
-        self.autorel_spin.setSpecialValueText("off")
-        self.autorel_spin.setToolTip("A held packet not acted on in this many seconds "
-                                     "auto-resolves, so the wire never stalls (0 = off).")
+        self.autorel_spin.setSuffix("s"); self.autorel_spin.setValue(0)
+        self.autorel_spin.setSpecialValueText("off"); self.autorel_spin.setMaximumWidth(58)
+        self.autorel_spin.setToolTip("Auto-resolve a held packet after N seconds so the "
+                                     "wire never stalls (0 = off).")
         self.autorel_spin.valueChanged.connect(self._push_queue_config)
-        vbar.addWidget(self.autorel_spin)
-        vbar.addWidget(QLabel("  On overflow:"))
+        obar.addWidget(self.autorel_spin)
         self.overflow_combo = QComboBox(); self.overflow_combo.addItems(["forward", "drop"])
+        self.overflow_combo.setMaximumWidth(84)
+        self.overflow_combo.setToolTip("What to do when the hold limit is reached")
         self.overflow_combo.currentTextChanged.connect(self._push_queue_config)
-        vbar.addWidget(self.overflow_combo)
-        vbar.addStretch(1)
-        root.addLayout(vbar)
+        obar.addWidget(self.overflow_combo)
+        obar.addWidget(self._dim("search"))
+        self.search_edit = QLineEdit(); self.search_edit.setPlaceholderText("held list\u2026")
+        self.search_edit.setMaximumWidth(150)
+        self.search_edit.textChanged.connect(self._apply_search)
+        obar.addWidget(self.search_edit)
+        root.addLayout(obar)
 
-        self.filter_status = QLabel("Intercept off — all traffic passes through.")
-        self.filter_status.setStyleSheet("color: palette(mid);")
-        root.addWidget(self.filter_status)
-
-        # active 'Apply to all' transforms (persistent rewrites) — visible + clearable
+        # active 'Apply to all' transforms (persistent rewrites) — shown only when present
         self.xform_row = QWidget()
         xl = QHBoxLayout(self.xform_row); xl.setContentsMargins(0, 0, 0, 0)
         self.xform_label = QLabel()
-        self.xform_label.setStyleSheet("color: #8e44ad; font-weight: 600;")
+        self.xform_label.setStyleSheet("color: #a06bd8; font-weight: 600;")
         self.btn_clear_xform = QPushButton("Clear transforms")
-        self.btn_clear_xform.clicked.connect(lambda: self.on_clear_transforms and self.on_clear_transforms())
+        self.btn_clear_xform.clicked.connect(
+            lambda: self.on_clear_transforms and self.on_clear_transforms())
         xl.addWidget(self.xform_label, 1); xl.addWidget(self.btn_clear_xform)
         self.xform_row.setVisible(False)
         root.addWidget(self.xform_row)
-
-        self.header = QLabel("Interception queue — held: 0")
-        self.header.setStyleSheet("font-weight: 700;")
-        root.addWidget(self.header)
-
-        # --- search box over the held queue ---------------------------------
-        sbar = QHBoxLayout()
-        sbar.addWidget(QLabel("Search:"))
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("filter the held list (id / iface / proto / info)")
-        self.search_edit.textChanged.connect(self._apply_search)
-        sbar.addWidget(self.search_edit, 1)
-        root.addLayout(sbar)
 
         split = QSplitter(Qt.Vertical)
 
@@ -207,6 +203,7 @@ class InterceptPanel(QWidget):
         self.hex_edit.setFont(mono)
         self.hex_edit.setPlaceholderText(
             "select a held packet to edit \u2014 switch Hex/ASCII, then Apply")
+        self.hex_edit.textChanged.connect(self._on_hex_changed)
         mb.addWidget(self.hex_edit)
         stackcol.addWidget(mbox)
         stackcol.setSizes([210, 240])
@@ -252,6 +249,11 @@ class InterceptPanel(QWidget):
         split.setSizes([140, 430])
         root.addWidget(split, 1)
         self._set_buttons_enabled(False)
+
+    def _dim(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: palette(mid); font-size: 10px;")
+        return lbl
 
     def _section(self, text: str) -> QLabel:
         lbl = QLabel(text)
@@ -350,7 +352,7 @@ class InterceptPanel(QWidget):
             self.table.setRowCount(0)
             self.tree.clear()
             self.hex_edit.clear()
-            self.header.setText("Interception queue — held: 0")
+            self.header.setText("held: 0")
             self._set_buttons_enabled(False)
             return
         self.refresh_pending()
@@ -366,7 +368,7 @@ class InterceptPanel(QWidget):
         if self.queue is None:
             return
         pending = self.queue.pending()
-        self.header.setText(f"Interception queue — held: {len(pending)}")
+        self.header.setText(f"held: {len(pending)}")
         selected = self._current_id
         self.table.setRowCount(0)
         now = time.time()
@@ -414,6 +416,7 @@ class InterceptPanel(QWidget):
         self.view_combo.setCurrentText("ASCII" if self._view == "ascii" else "Hex")
         self.view_combo.blockSignals(False)
         self.tree.setVisible(hp.kind != "message")
+        self._orig_bytes = hp.data
         self.set_original(hp.data)
         self._set_work_bytes(hp.data)
         self._set_buttons_enabled(True)
@@ -435,6 +438,39 @@ class InterceptPanel(QWidget):
             self.hex_edit.setPlainText(" ".join(f"{b:02x}" for b in self._work))
         else:
             self.hex_edit.setPlainText(self._work.decode("latin-1"))
+        self._refresh_diff()
+
+    def _on_hex_changed(self) -> None:
+        if not self._applying:
+            self._refresh_diff()
+
+    def _refresh_diff(self) -> None:
+        """Highlight the regions of the Modified editor that differ from Original."""
+        import difflib
+
+        if self._current_id is None or not self._orig_bytes:
+            self.hex_edit.setExtraSelections([])
+            return
+        if self._view == "hex":
+            orig = " ".join(f"{b:02x}" for b in self._orig_bytes)
+        else:
+            orig = self._orig_bytes.decode("latin-1").replace("\r\n", "\n").replace("\r", "\n")
+        mod = self.hex_edit.toPlainText()
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor(60, 200, 120, 70))     # subtle green = added/changed
+        doc = self.hex_edit.document()
+        sels = []
+        for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(
+                None, orig, mod, autojunk=False).get_opcodes():
+            if tag in ("replace", "insert") and j2 > j1:
+                cur = QTextCursor(doc)
+                cur.setPosition(j1)
+                cur.setPosition(j2, QTextCursor.KeepAnchor)
+                sel = QTextEdit.ExtraSelection()
+                sel.cursor = cur
+                sel.format = fmt
+                sels.append(sel)
+        self.hex_edit.setExtraSelections(sels)
 
     def _sync_from_editor(self) -> bool:
         """Parse the editor content (per view) into the working bytes.
@@ -462,6 +498,7 @@ class InterceptPanel(QWidget):
         self._applying = True
         self._render_editor()
         self._applying = False
+        self._refresh_diff()
 
     def _apply_edit(self) -> None:
         if not self._sync_from_editor():
