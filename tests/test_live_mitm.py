@@ -178,3 +178,47 @@ def test_mitm_plus_nfqueue_rewrites_forwarded_traffic():
             for cmd in remove:
                 subprocess.run(cmd, check=False, capture_output=True)
             mitm.stop()
+
+
+def _gw_mac_in(ns: str, family: str, gw_ip: str) -> str | None:
+    """The MAC namespace `ns` currently believes the gateway lives at, or None."""
+    for line in neigh_table(ns, family).splitlines():
+        parts = line.split()
+        if parts and parts[0] == gw_ip and "lladdr" in parts:
+            return parts[parts.index("lladdr") + 1].lower()
+    return None
+
+
+def test_arp_mitm_poisons_multiple_victims_at_once():
+    """One ArpMitm poisons two victims simultaneously — both route their gateway
+    traffic through the attacker, and both caches restore on stop."""
+    from reforge.attacks.arp_mitm import ArpMitm
+
+    with SegmentLab() as net:
+        atk_mac = _attacker_mac()
+        victims = [net["victim_ip4"], net["victim2_ip4"]]
+        for vns, vip in (("rf-victim", net["victim_ip4"]), ("rf-victim2", net["victim2_ip4"])):
+            netns_exec(vns, "ping", "-c", "1", "-W", "1", net["gateway_ip4"], check=False)
+            assert _gw_mac_in(vns, "-4", net["gateway_ip4"]) not in (None, atk_mac)
+
+        mitm = ArpMitm(ATTACKER_IFACE, victims, gateway=net["gateway_ip4"], interval=1.0)
+        assert mitm.start(), f"MITM did not start: {mitm.warnings}"
+        try:
+            for vns in ("rf-victim", "rf-victim2"):
+                flipped = False
+                for _ in range(15):
+                    if _gw_mac_in(vns, "-4", net["gateway_ip4"]) == atk_mac:
+                        flipped = True
+                        break
+                    time.sleep(0.4)
+                assert flipped, f"{vns} never routed through the attacker"
+            assert set(mitm.status()["targets"]) == set(victims)
+        finally:
+            mitm.stop()
+
+        for vns in ("rf-victim", "rf-victim2"):
+            for _ in range(15):
+                if _gw_mac_in(vns, "-4", net["gateway_ip4"]) != atk_mac:
+                    break
+                time.sleep(0.4)
+            assert _gw_mac_in(vns, "-4", net["gateway_ip4"]) != atk_mac, f"{vns} not restored"

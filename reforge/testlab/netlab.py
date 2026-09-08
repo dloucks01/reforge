@@ -90,6 +90,7 @@ SEG_ATTACKER = ("rf-atk", "rf-atk-br", "10.9.9.1/24", "fd00:9::1/64")
 # (namespace, host-side veth, bridge-side veth, ipv4/cidr, ipv6/cidr)
 SEG_HOSTS = [
     ("rf-victim", "rf-vic", "rf-vic-br", "10.9.9.50/24", "fd00:9::50/64"),
+    ("rf-victim2", "rf-vic2", "rf-vic2-br", "10.9.9.51/24", "fd00:9::51/64"),
     ("rf-gw", "rf-gw-h", "rf-gw-br", f"{SEG_GW4}/24", f"{SEG_GW6}/64"),
 ]
 
@@ -144,11 +145,10 @@ def up_segment_lab() -> dict:
         netns_exec(ns, "ip", "-4", "addr", "replace", ip4, "dev", hveth, check=False)
         netns_exec(ns, "ip", "-6", "addr", "replace", ip6, "dev", hveth, check=False)
 
-    # victim routes out via the gateway (so intercepting that path matters)
-    netns_exec("rf-victim", "ip", "-4", "route", "replace", "default", "via", SEG_GW4,
-               check=False)
-    netns_exec("rf-victim", "ip", "-6", "route", "replace", "default", "via", SEG_GW6,
-               check=False)
+    # victims route out via the gateway (so intercepting that path matters)
+    for vns in ("rf-victim", "rf-victim2"):
+        netns_exec(vns, "ip", "-4", "route", "replace", "default", "via", SEG_GW4, check=False)
+        netns_exec(vns, "ip", "-6", "route", "replace", "default", "via", SEG_GW6, check=False)
     # A MITM relays victim<->gateway by IP forwarding, but many hosts (Docker,
     # firewalld) ship a FORWARD policy of DROP and strict rp_filter that would
     # silently kill the relayed traffic. Permit forwarding for the lab subnet so
@@ -158,6 +158,7 @@ def up_segment_lab() -> dict:
         "bridge": SEG_BRIDGE, "attacker": atk,
         "attacker_ip4": atk4.split("/")[0], "attacker_ip6": atk6.split("/")[0],
         "victim_ip4": "10.9.9.50", "victim_ip6": "fd00:9::50",
+        "victim2_ip4": "10.9.9.51", "victim2_ip6": "fd00:9::51",
         "gateway_ip4": SEG_GW4, "gateway_ip6": SEG_GW6,
     }
 
