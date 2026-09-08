@@ -460,3 +460,54 @@ def test_ipv6_ndp_mitm_content_injection_reaches_victim():
                 mitm.stop()
             if server is not None:
                 server.terminate(); server.wait(timeout=3)
+
+
+def test_userspace_bridge_delivers_and_injects_a_real_tcp_flow():
+    """The tool's own userspace bridge (not NFQUEUE) forwards a full real TCP
+    flow between two hosts and rewrites the response inline; the client receives
+    the injected content."""
+    import tempfile
+
+    from reforge.core.bridge import UserspaceBridge
+    from reforge.rules.actions import PayloadReplace
+    from reforge.rules.base import Rule
+    from reforge.rules.engine import RuleEngine
+    from reforge.rules.filter import parse_filter
+    from reforge.testlab.netlab import BridgeFlowLab
+
+    docroot = tempfile.mkdtemp(prefix="rf-bf-")
+    with open(os.path.join(docroot, "page.html"), "w") as fh:
+        fh.write("BODY=ORIGINAL-TOKEN\n")     # same length as the replacement
+
+    server = bridge = None
+    with BridgeFlowLab() as lab:
+        try:
+            server = subprocess.Popen(
+                ["ip", "netns", "exec", lab["server_ns"], "python3", "-m", "http.server",
+                 "8000", "--bind", lab["server_ip"]],
+                cwd=docroot, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.0)
+
+            engine = RuleEngine([Rule("inject",
+                                      parse_filter('Raw.load contains "ORIGINAL-TOKEN"'),
+                                      [PayloadReplace(b"ORIGINAL-TOKEN", b"INJECTED-TOKEN")])])
+            bridge = UserspaceBridge(lab["port_a"], lab["port_b"], engine, armed=True)
+            bridge.start()
+            assert bridge.wait_ready(5.0), "bridge did not come up"
+
+            got = ""
+            for _ in range(3):
+                r = netns_exec(lab["client_ns"], "curl", "-s", "-m", "8",
+                               f"http://{lab['server_ip']}:8000/page.html", check=False)
+                got = r.stdout
+                if "INJECTED-TOKEN" in got:
+                    break
+                time.sleep(0.3)
+            assert "INJECTED-TOKEN" in got, f"bridge did not deliver/inject: {got!r}"
+            assert bridge.counters.modified >= 1
+            assert bridge.counters.errors == 0
+        finally:
+            if bridge is not None:
+                bridge.stop()
+            if server is not None:
+                server.terminate(); server.wait(timeout=3)

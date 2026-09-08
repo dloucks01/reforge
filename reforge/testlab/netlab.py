@@ -219,6 +219,67 @@ class SegmentLab:
         down_segment_lab()
 
 
+# ---------------------------------------------------------------------------
+# Bridge-flow lab: a client and a server in separate namespaces whose only path
+# to each other is through two veths (bf-c-br, bf-s-br) that a userspace bridge
+# sits between. Lets a full real TCP flow traverse the tool's own L2 bridge so
+# forwarding + inline manipulation can be proven end to end. Offloads are turned
+# off on every veth so re-injected frames carry valid checksums (the same prep
+# the production bridge does via privhelper.netconfig.prepare_bridge).
+# ---------------------------------------------------------------------------
+BRIDGE_FLOW = {
+    "client_ns": "rf-bfc", "server_ns": "rf-bfs",
+    "client_veth": "bf-c", "client_br": "bf-c-br",
+    "server_veth": "bf-s", "server_br": "bf-s-br",
+    "client_ip": "10.8.8.1", "server_ip": "10.8.8.2", "prefix": "/24",
+    "port_a": "bf-c-br", "port_b": "bf-s-br",
+}
+_BF_OFFLOADS = ["tx", "rx", "gso", "tso", "gro", "sg"]
+
+
+def up_bridge_flow_lab() -> dict:
+    bf = BRIDGE_FLOW
+    for nsn in (bf["client_ns"], bf["server_ns"]):
+        if not ns_exists(nsn):
+            _run("ip", "netns", "add", nsn)
+    pairs = ((bf["client_veth"], bf["client_br"], bf["client_ns"], bf["client_ip"]),
+             (bf["server_veth"], bf["server_br"], bf["server_ns"], bf["server_ip"]))
+    for veth, bveth, nsn, ip in pairs:
+        if not iface_exists(bveth) and not _in_ns(nsn, veth):
+            _run("ip", "link", "add", veth, "type", "veth", "peer", "name", bveth)
+        _run("ip", "link", "set", veth, "netns", nsn, check=False)
+        _run("ip", "link", "set", bveth, "up", check=False)
+        for feat in _BF_OFFLOADS:               # bridge-side veth: offloads off
+            _run("ethtool", "-K", bveth, feat, "off", check=False)
+        netns_exec(nsn, "ip", "link", "set", "lo", "up", check=False)
+        netns_exec(nsn, "ip", "link", "set", veth, "up", check=False)
+        netns_exec(nsn, "ip", "addr", "replace", ip + bf["prefix"], "dev", veth, check=False)
+        for feat in _BF_OFFLOADS:               # host-side veth: offloads off too
+            netns_exec(nsn, "ethtool", "-K", veth, feat, "off", check=False)
+    return dict(bf)
+
+
+def down_bridge_flow_lab() -> None:
+    bf = BRIDGE_FLOW
+    for nsn in (bf["client_ns"], bf["server_ns"]):
+        if ns_exists(nsn):
+            subprocess.run(["ip", "netns", "del", nsn], capture_output=True, check=False)
+    del_iface(bf["client_br"])
+    del_iface(bf["server_br"])
+
+
+class BridgeFlowLab:
+    """Client/server split by a userspace bridge, as a context manager (root)."""
+
+    def __enter__(self) -> dict:
+        self.info = up_bridge_flow_lab()
+        _resync_scapy()
+        return self.info
+
+    def __exit__(self, *exc) -> None:
+        down_bridge_flow_lab()
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
