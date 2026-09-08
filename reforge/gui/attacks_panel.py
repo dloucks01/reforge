@@ -388,50 +388,164 @@ class AttacksPanel(QWidget):
 
     # ---- NDP (IPv6) ---------------------------------------------------------
     def _ndp_box(self) -> QGroupBox:
-        box = QGroupBox("NDP / IPv6 — NA spoof / rogue RA")
+        box = QGroupBox("IPv6 NDP man-in-the-middle — discover, pick victims, MITM")
         v = QVBoxLayout(box)
         row = QHBoxLayout()
         self.ndp_if = QComboBox(); self.ndp_if.addItems(_ifaces())
-        self.ndp_mode = QComboBox(); self.ndp_mode.addItems(["na-spoof", "rogue-ra"])
-        self.ndp_target = QLineEdit(); self.ndp_target.setPlaceholderText("target IPv6 (na)")
-        self.ndp_victim = QLineEdit(); self.ndp_victim.setPlaceholderText("victim IPv6 (na)")
-        self.ndp_mac = QLineEdit(); self.ndp_mac.setPlaceholderText("our MAC")
-        b_start = QPushButton("Start"); b_start.clicked.connect(self._ndp_start)
-        b_stop = QPushButton("Stop"); b_stop.clicked.connect(self._ndp_stop)
-        for w in (QLabel("Iface:"), self.ndp_if, self.ndp_mode, self.ndp_target,
-                  self.ndp_victim, self.ndp_mac, b_start, b_stop):
+        self.ndp_router = QLineEdit(); self.ndp_router.setPlaceholderText("router (auto)")
+        self.ndp_router.setMaximumWidth(170)
+        b_disc = QPushButton("Discover hosts"); b_disc.clicked.connect(self._ndp_discover)
+        self.ndp_start_btn = QPushButton("Start MITM"); self.ndp_start_btn.clicked.connect(self._ndp_start)
+        b_stop = QPushButton("Restore && stop"); b_stop.clicked.connect(self._ndp_stop)
+        for w in (QLabel("Iface:"), self.ndp_if, QLabel("Router:"), self.ndp_router,
+                  b_disc, self.ndp_start_btn, b_stop):
             row.addWidget(w)
         v.addLayout(row)
-        self.ndp_status = QLabel("idle"); v.addWidget(self.ndp_status)
+
+        self.ndp_rogue_ra = QCheckBox("Also send rogue Router Advertisements "
+                                      "(advertise ourselves as a default router)")
+        self.ndp_rogue_ra.setToolTip("Belt-and-braces: on top of NA poisoning, periodically "
+                                     "multicast an RA so hosts add us as a route")
+        v.addWidget(self.ndp_rogue_ra)
+
+        self.ndp_hosts = QTableWidget(0, 2)
+        self.ndp_hosts.setHorizontalHeaderLabels(["Victim (check to target)", "MAC"])
+        self.ndp_hosts.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.ndp_hosts.verticalHeader().setVisible(False)
+        self.ndp_hosts.setMaximumHeight(150)
+        self.ndp_hosts.setSelectionMode(QTableWidget.NoSelection)
+        self.ndp_hosts.setEditTriggers(QTableWidget.NoEditTriggers)
+        v.addWidget(self.ndp_hosts)
+
+        self.ndp_status = QLabel("Pick an interface and Discover hosts. Then check victims and Start MITM.")
+        self.ndp_status.setWordWrap(True)
+        v.addWidget(self.ndp_status)
+
+        self._ndp = None
+        self._ndp_busy = False
+        self._ndp_result = None
+        self._ndp_logged = False
+        self._ndp_timer = QTimer(self); self._ndp_timer.setInterval(400)
+        self._ndp_timer.timeout.connect(self._ndp_tick)
         return box
 
+    def _ndp_checked_victims(self) -> list:
+        router = self.ndp_router.text().strip()
+        out = []
+        for r in range(self.ndp_hosts.rowCount()):
+            it = self.ndp_hosts.item(r, 0)
+            if it is not None and it.checkState() == Qt.Checked:
+                ip = it.data(Qt.UserRole)
+                if ip and ip != router:
+                    out.append(ip)
+        return out
+
+    def _ndp_discover(self):
+        if self._ndp_busy:
+            return
+        iface = self.ndp_if.currentText()
+        self._ndp_busy = True
+        self.ndp_status.setText(f"Discovering IPv6 hosts on {iface}… (pinging ff02::1)")
+        self.ndp_status.setStyleSheet("")
+
+        def work():
+            try:
+                from reforge.attacks.ndp_mitm import default_router6, discover_hosts6
+                hosts = discover_hosts6(iface)
+                self._ndp_result = ("hosts", hosts, default_router6(iface))
+            except Exception as exc:
+                self._ndp_result = ("error", explain(exc))
+
+        threading.Thread(target=work, daemon=True).start()
+        self._ndp_timer.start()
+
     def _ndp_start(self):
-        from reforge.attacks import ndp
+        from reforge.attacks.ndp_mitm import NdpMitm
 
         self._ndp_stop()
-        iface = self.ndp_if.currentText()
-        mac = self.ndp_mac.text().strip()
-        try:
-            if self.ndp_mode.currentText() == "na-spoof":
-                self._ndp = ndp.NdpSpoofer(iface, self.ndp_target.text().strip(),
-                                           self.ndp_victim.text().strip(), mac)
-            else:
-                self._ndp = ndp.RogueRouter(iface, mac)
-            self._ndp.start()
-            self.ndp_status.setText(f"{self.ndp_mode.currentText()} running on {iface}…")
-        except Exception as exc:
-            self.ndp_status.setText(f"error: {explain(exc)}")
+        victims = self._ndp_checked_victims()
+        if not victims:
+            self.ndp_status.setText("Check at least one victim in the list first.")
+            return
+        router = self.ndp_router.text().strip() or None
+        self._ndp = NdpMitm(self.ndp_if.currentText(), victims, router=router,
+                            rogue_ra=self.ndp_rogue_ra.isChecked())
+        self._ndp_busy = True
+        self.ndp_status.setText("Starting MITM (resolving MACs, enabling IPv6 forwarding)…")
+
+        def work():
+            try:
+                if not self._ndp.start():
+                    self._ndp_result = ("startfail", "; ".join(self._ndp.warnings) or "could not start")
+            except Exception as exc:
+                self._ndp_result = ("error", explain(exc))
+
+        threading.Thread(target=work, daemon=True).start()
+        self._ndp_timer.start()
+
+    def _populate_ndp_hosts(self, hosts, router):
+        self.ndp_hosts.setRowCount(0)
+        for ip, mac in hosts:
+            r = self.ndp_hosts.rowCount(); self.ndp_hosts.insertRow(r)
+            label = ip + ("  (router)" if router and ip == router else "")
+            item = QTableWidgetItem(label)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            item.setData(Qt.UserRole, ip)
+            self.ndp_hosts.setItem(r, 0, item)
+            self.ndp_hosts.setItem(r, 1, QTableWidgetItem(mac))
+        if router and not self.ndp_router.text().strip():
+            self.ndp_router.setText(router)
+
+    def _ndp_tick(self):
+        res, self._ndp_result = self._ndp_result, None
+        if res is not None:
+            self._ndp_busy = False
+            if res[0] == "hosts":
+                _tag, hosts, router = res
+                self._populate_ndp_hosts(hosts, router)
+                self.ndp_status.setText(
+                    f"Found {len(hosts)} host(s). Check victims (router {router or '?'} used "
+                    "automatically), then Start MITM.")
+            elif res[0] == "startfail":
+                self.ndp_status.setText(f"Could not start: {res[1]}")
+                self.ndp_status.setStyleSheet("color:#ff5c6c; font-weight:600;")
+            elif res[0] == "error":
+                self.ndp_status.setText(f"error: {res[1]}")
+                self.ndp_status.setStyleSheet("color:#ff5c6c; font-weight:600;")
+        if self._ndp is not None and self._ndp.status().get("running"):
+            st = self._ndp.status()
+            self._render_ndp_status(st)
+            if not self._ndp_logged and self.on_event is not None:
+                self._ndp_logged = True
+                self.on_event("mitm", "NDP: " + ", ".join(st['targets']) + " <-> " + str(st['router']))
+        elif self._ndp is None and not self._ndp_busy:
+            self._ndp_timer.stop()
+
+    def _render_ndp_status(self, st):
+        fwd_ok = st["forwarding_on"]
+        fwd = "ON" if fwd_ok else "OFF ⚠ victims will lose connectivity"
+        msg = (f"● NDP MITM ACTIVE — {len(st['targets'])} target(s) ↔ {st['router']}   "
+               f"forwarding {fwd}   ·   relayed {st['relayed']}   ·   NAs sent {st['sent']}")
+        if st["unresolved"]:
+            msg += f"   (unresolved: {', '.join(st['unresolved'])})"
+        self.ndp_status.setText(msg)
+        self.ndp_status.setStyleSheet(
+            f"color:{'#3ddc97' if fwd_ok else '#ff5c6c'}; font-weight:700;")
 
     def _ndp_stop(self):
+        if self._ndp_logged and self.on_event is not None:
+            self.on_event("mitm-stop", "NDP caches restored")
+            self._ndp_logged = False
         if self._ndp:
             try:
                 self._ndp.stop()
             except Exception:
                 pass
             self._ndp = None
-            self.ndp_status.setText("stopped")
+            self.ndp_status.setText("Stopped — neighbor caches restored.")
+            self.ndp_status.setStyleSheet("")
 
-    # ---- TLS interception ---------------------------------------------------
     def _tls_box(self) -> QGroupBox:
         box = QGroupBox("TLS interception (certificate-injection MITM)")
         v = QVBoxLayout(box)
