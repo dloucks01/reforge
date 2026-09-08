@@ -58,6 +58,9 @@ class AttacksPanel(QWidget):
         # set by the main window: returns a shared InterceptQueue (and shows it in
         # the Intercept tab) for interactive message interception.
         self.get_intercept_queue = None
+        self.on_start_inline = None   # (iface, victims) -> divert forwarded traffic to NFQUEUE
+        self.on_stop_inline = None
+        self._inline_started = False
         self._arp = None
         self._dns = None
         self._name = None
@@ -95,6 +98,12 @@ class AttacksPanel(QWidget):
                   b_disc, self.arp_start_btn, b_stop):
             row.addWidget(w)
         v.addLayout(row)
+
+        self.arp_intercept = QCheckBox("Intercept && rewrite their traffic (NFQUEUE) "
+                                       "— hold/edit victim packets in the Intercept tab")
+        self.arp_intercept.setToolTip("With MITM active, divert the victim's forwarded "
+                                      "packets through the rule engine + interactive intercept")
+        v.addWidget(self.arp_intercept)
 
         self.arp_hosts = QTableWidget(0, 2)
         self.arp_hosts.setHorizontalHeaderLabels(["Victim (check to target)", "MAC"])
@@ -201,6 +210,13 @@ class AttacksPanel(QWidget):
                 self.arp_status.setStyleSheet("color:#ff5c6c; font-weight:600;")
         if self._arp is not None and self._arp.status().get("running"):
             self._render_arp_status(self._arp.status())
+            if (self.arp_intercept.isChecked() and not self._inline_started
+                    and self.on_start_inline is not None):
+                self._inline_started = True
+                try:
+                    self.on_start_inline(self._arp.iface, self._arp.active_targets())
+                except Exception as exc:
+                    self.arp_status.setText(f"inline error: {explain(exc)}")
         elif self._arp is None and not self._arp_busy:
             self._arp_timer.stop()
 
@@ -216,6 +232,12 @@ class AttacksPanel(QWidget):
             f"color:{'#3ddc97' if fwd_ok else '#ff5c6c'}; font-weight:700;")
 
     def _arp_stop(self):
+        if self._inline_started and self.on_stop_inline is not None:
+            try:
+                self.on_stop_inline()
+            except Exception:
+                pass
+            self._inline_started = False
         if self._arp:
             try:
                 self._arp.stop()

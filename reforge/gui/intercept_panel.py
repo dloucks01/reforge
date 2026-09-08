@@ -62,6 +62,7 @@ class InterceptPanel(QWidget):
         self._work: bytes = b""
         self._orig_bytes: bytes = b""
         self._current_kind = "packet"
+        self._current_link = "ether"
         self._view = "hex"                 # raw editor view: "hex" | "ascii"
         self._applying = False
         # Set by the main window: on_filter(match_or_None, text) installs/clears a
@@ -288,6 +289,16 @@ class InterceptPanel(QWidget):
         lbl.setObjectName("regionLabel")
         return lbl
 
+    def _dissect(self, data: bytes, link: str | None = None):
+        from scapy.layers.inet import IP
+        from scapy.layers.inet6 import IPv6
+        from scapy.layers.l2 import Ether
+
+        link = link or self._current_link
+        if link == "ip":
+            return (IPv6 if (data and (data[0] >> 4) == 6) else IP)(data)
+        return Ether(data)
+
     def set_original(self, data: bytes) -> None:
         """Show a packet in the read-only Original view (inspection + intercept).
 
@@ -297,9 +308,7 @@ class InterceptPanel(QWidget):
         self.orig_tree.clear()
         if data:
             try:
-                from scapy.layers.l2 import Ether
-
-                for layer in scapy_tree.to_tree(Ether(data)):
+                for layer in scapy_tree.to_tree(self._dissect(data)):
                     parent = QTreeWidgetItem([layer.name, ""])
                     for f in layer.fields:
                         c = QTreeWidgetItem([f.name, f.human])
@@ -421,8 +430,7 @@ class InterceptPanel(QWidget):
                 info = (hp.meta or {}).get("summary", "")
             else:
                 try:
-                    pkt = __import__("scapy.layers.l2", fromlist=["Ether"]).Ether(hp.data)
-                    row = scapy_tree.summarize(pkt)
+                    row = scapy_tree.summarize(self._dissect(hp.data, hp.link))
                     proto, info = row.proto, row.info
                 except Exception:
                     proto, info = "?", ""
@@ -451,6 +459,7 @@ class InterceptPanel(QWidget):
             return
         self._current_id = pid
         self._current_kind = hp.kind
+        self._current_link = getattr(hp, "link", "ether")
         # default the raw view to ASCII for HTTP messages, Hex for packets;
         # packets also keep the field tree
         self._view = "ascii" if hp.kind == "message" else "hex"
@@ -583,9 +592,7 @@ class InterceptPanel(QWidget):
         self._applying = True
         self.tree.clear()
         try:
-            from scapy.layers.l2 import Ether
-
-            for layer in scapy_tree.to_tree(Ether(self._work)):
+            for layer in scapy_tree.to_tree(self._dissect(self._work)):
                 parent = QTreeWidgetItem([layer.name, ""])
                 parent.setFlags(parent.flags() & ~Qt.ItemIsEditable)
                 for f in layer.fields:
@@ -609,7 +616,7 @@ class InterceptPanel(QWidget):
         layer, field = meta
         text = item.text(1)
         try:
-            pkt = Packet.from_bytes(self._work, link="ether")
+            pkt = Packet.from_bytes(self._work, link=self._current_link)
             pkt.set_field(layer, field, text)
             self._set_work_bytes(pkt.rebuild())
         except Exception:

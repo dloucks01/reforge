@@ -40,6 +40,7 @@ class HeldPacket:
     deadline: float | None = None            # auto-release time (None = never)
     kind: str = "packet"                     # "packet" (raw frame) | "message" (HTTP)
     meta: dict | None = None                 # display hints (e.g. summary line)
+    link: str = "ether"                      # "ether" (bridge frame) | "ip" (NFQUEUE)
 
     @property
     def resolved(self) -> bool:
@@ -77,7 +78,7 @@ class InterceptQueue:
     def hold(self, ingress: str, data: bytes,
              on_release: Callable[[bytes | None], None],
              flow_key: object = None, kind: str = "packet",
-             meta: dict | None = None) -> HeldPacket | None:
+             meta: dict | None = None, link: str = "ether") -> HeldPacket | None:
         """Park a packet/message for the operator. Blocks its flow until resolved.
 
         Returns the HeldPacket, or None if the queue is at capacity — in which
@@ -94,7 +95,7 @@ class InterceptQueue:
             deadline = (time.time() + self.auto_release_s) if self.auto_release_s else None
             hp = HeldPacket(self._next_id, ingress, bytes(data), time.time(),
                             on_release, flow_key=key, operator=True, deadline=deadline,
-                            kind=kind, meta=meta)
+                            kind=kind, meta=meta, link=link)
             self._pending[hp.id] = hp
             self._flows.setdefault(key, []).append(hp)
             self.stats["held"] += 1

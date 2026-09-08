@@ -261,6 +261,8 @@ class MainWindow(QMainWindow):
         )
         self.attacks_panel = AttacksPanel()
         self.attacks_panel.get_intercept_queue = self._shared_intercept_queue
+        self.attacks_panel.on_start_inline = self._start_inline
+        self.attacks_panel.on_stop_inline = self._stop_inline
         self.recon_panel = ReconPanel()
         self.scan_panel = ScanPanel(get_inventory=lambda: self.recon_panel.inv)
         self.scenario_panel = ScenarioPanel()
@@ -630,6 +632,45 @@ class MainWindow(QMainWindow):
         self.intercept_panel.set_transform_count(0)
         self.statusBar().showMessage("Cleared all interactive transforms.")
 
+    def _start_inline(self, iface: str, victims: list) -> str:
+        """Divert a MITM'd victim's forwarded traffic into the rule engine +
+        interactive intercept via NFQUEUE. Returns a status string."""
+        import subprocess
+        import threading
+
+        from reforge.capture.nfqueue import NfqueueRunner, nft_forward_queue_rules
+
+        self._stop_inline()
+        engine = self.rules_panel.build_engine(dry_run=False)
+        self.engine = engine
+        self._install_intercept_filter(engine)      # the Intercept-tab filter applies here too
+        queue = self._shared_intercept_queue()
+        self.intercept_panel.set_transform_count(len(self._transforms))
+
+        install, self._nfq_remove = nft_forward_queue_rules(1, victims or None)
+        for cmd in install:
+            subprocess.run(cmd, capture_output=True, check=False)
+        self._nfq_runner = NfqueueRunner(engine, queue_num=1, intercept=queue)
+        self._nfq_thread = threading.Thread(target=self._nfq_runner.run, daemon=True)
+        self._nfq_thread.start()
+        self.statusBar().showMessage("Inline manipulation ON — victim traffic flows through "
+                                     "the Intercept tab. Set a filter to hold, or add rules.")
+        return "inline via NFQUEUE"
+
+    def _stop_inline(self) -> None:
+        import subprocess
+
+        runner = getattr(self, "_nfq_runner", None)
+        if runner is not None:
+            try:
+                runner.stop()
+            except Exception:
+                pass
+            self._nfq_runner = None
+        for cmd in getattr(self, "_nfq_remove", []):
+            subprocess.run(cmd, capture_output=True, check=False)
+        self._nfq_remove = []
+
     def _shared_intercept_queue(self):
         """Return the intercept queue (creating one if no bridge is running).
 
@@ -919,6 +960,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         self._save_settings()                 # remember last-used inputs
         self._save_layout()                   # remember the pane split + workspaces
+        self._stop_inline()
         self.stop_capture()
         for cleanup in (self.attacks_panel.stop_all, self.console_panel.stop):
             try:
