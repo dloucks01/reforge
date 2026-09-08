@@ -876,7 +876,23 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(f"Capture stopped: {err}")
                 QMessageBox.warning(self, "Capture stopped", f"The capture stopped:\n\n{err}")
         elif n:
-            self.statusBar().showMessage(f"Capturing — {len(self.packets)} packets")
+            self.statusBar().showMessage(
+                f"Capturing — {len(self.packets)} packets{self._loss_suffix()}")
+
+    def _loss_suffix(self) -> str:
+        """A visible ' · dropped N (X%)' tail when capture is losing frames."""
+        fn = getattr(self.service, "stats", None)
+        if fn is None:
+            return ""
+        try:
+            st = fn()
+        except Exception:
+            return ""
+        if st.get("total_dropped", 0) <= 0:
+            return ""
+        kern = st.get("kernel_dropped", 0)
+        where = " (kernel — raise buffer / faster backend)" if kern else " (UI backpressure)"
+        return f"   ⚠ dropped {st['total_dropped']} ({st['loss_pct']}%){where}"
 
     # ---- arm / kill-switch --------------------------------------------------
     def _on_arm_toggled(self, armed: bool) -> None:

@@ -27,6 +27,8 @@ class CaptureService:
         self._running = threading.Event()
         self.dropped = 0
         self.captured = 0
+        self.kern_received = 0              # frames the kernel saw (if backend reports)
+        self.kern_dropped = 0              # frames the kernel dropped before userspace
         self.error: str | None = None       # set if the loop stops on an error
 
     def start(self) -> None:
@@ -54,12 +56,38 @@ class CaptureService:
                         self.captured += 1
                     except Exception:
                         self.dropped += 1  # backpressure: count, never block the wire
+                self._poll_kernel_stats()
         except Exception as exc:
             self.error = f"{type(exc).__name__}: {exc}"   # e.g. interface removed
             log.exception("capture loop error")
         finally:
             self.backend.close()
             self._running.clear()
+
+    def _poll_kernel_stats(self) -> None:
+        """Pull the backend's kernel drop counters, if it exposes any."""
+        fn = getattr(self.backend, "capture_stats", None)
+        if fn is None:
+            return
+        try:
+            st = fn()
+            self.kern_received = st.get("received", self.kern_received)
+            self.kern_dropped = st.get("dropped", self.kern_dropped)
+        except Exception:
+            pass
+
+    def stats(self) -> dict:
+        """Combined capture health: userspace queue + kernel socket drops."""
+        total_drop = self.dropped + self.kern_dropped
+        seen = self.captured + total_drop
+        return {
+            "captured": self.captured,
+            "queue_dropped": self.dropped,
+            "kernel_received": self.kern_received,
+            "kernel_dropped": self.kern_dropped,
+            "total_dropped": total_drop,
+            "loss_pct": round(100.0 * total_drop / seen, 2) if seen else 0.0,
+        }
 
     def drain(self, max_items: int = 5000) -> list[tuple[float, Frame]]:
         """Pull up to max_items captured frames (non-blocking)."""
