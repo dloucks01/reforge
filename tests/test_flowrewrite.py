@@ -40,9 +40,9 @@ def test_reverse_ack_shifts_by_position():
     early = _rseg(1500)           # acks data before the edit -> unchanged
     fr.apply(early)
     assert early[TCP].ack == 1500
-    late = _rseg(3000)            # acks data after the edit -> +5
+    late = _rseg(3000)            # acks grown data after the edit -> convert down by 5
     fr.apply(late)
-    assert late[TCP].ack == 3005
+    assert late[TCP].ack == 2995   # sender sent 5 fewer bytes; its ack is 5 lower
 
 
 def test_retransmit_not_double_counted():
@@ -79,3 +79,20 @@ def test_bridge_flow_rewrite_uses_position_aware_fixer():
     br = UserspaceBridge("a", "b", engine, flow_rewrite=True)
     from reforge.core.flowrewrite import FlowRewriter as FR
     assert isinstance(br.seq_fixer, FR)
+
+
+def test_reverse_ack_converts_down_full_roundtrip():
+    """A grown forward segment means the receiver acks in grown coordinates; the
+    original sender expects its own (smaller) coordinates, so the ack converts
+    DOWN by the delta (regression guard for the reverse-ACK sign bug)."""
+    fr = FlowRewriter()
+    # forward edit at seq 1000 grew the stream by +16
+    fr.note_length_change(_fseg(1000), +16, orig_seq=1000)
+    # a later forward segment (orig seq 1014) shifts UP by 16 -> 1030
+    fwd = _fseg(1014)
+    fr.apply(fwd)
+    assert fwd[TCP].seq == 1030
+    # the receiver acks 1030 (grown); the sender expects 1014 -> convert DOWN
+    ack = _rseg(1030)
+    fr.apply(ack)
+    assert ack[TCP].ack == 1014

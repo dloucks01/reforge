@@ -511,3 +511,77 @@ def test_userspace_bridge_delivers_and_injects_a_real_tcp_flow():
                 bridge.stop()
             if server is not None:
                 server.terminate(); server.wait(timeout=3)
+
+
+def _run_two_segment_flow(flow_rewrite: bool) -> str:
+    """Client reads a 2-segment server response where the bridge grows the first
+    segment; returns what the client received. With flow_rewrite the second
+    segment must still arrive (seq/ack fix-up); without it, the flow desyncs."""
+    import textwrap
+
+    from reforge.core.bridge import UserspaceBridge
+    from reforge.rules.actions import PayloadReplace
+    from reforge.rules.base import Rule
+    from reforge.rules.engine import RuleEngine
+    from reforge.rules.filter import parse_filter
+    from reforge.testlab.netlab import BridgeFlowLab
+
+    server = bridge = None
+    with BridgeFlowLab() as lab:
+        try:
+            srv_code = textwrap.dedent(f'''
+                import socket, time
+                s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(("{lab['server_ip']}", 9099)); s.listen(1)
+                c, _ = s.accept()
+                c.sendall(b"FIRST:SHORT-X\\n"); time.sleep(0.3)
+                c.sendall(b"SECOND-PART-INTACT\\n"); time.sleep(0.2); c.close()
+            ''')
+            server = subprocess.Popen(
+                ["ip", "netns", "exec", lab["server_ns"], "python3", "-c", srv_code],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(0.5)
+
+            engine = RuleEngine([Rule("grow", parse_filter('Raw.load contains "SHORT-X"'),
+                                      [PayloadReplace(b"SHORT-X", b"MUCH-LONGER-REPLACEMENT")])])
+            bridge = UserspaceBridge(lab["port_a"], lab["port_b"], engine, armed=True,
+                                     flow_rewrite=flow_rewrite)
+            bridge.start(); bridge.wait_ready(5.0)
+
+            cli_code = textwrap.dedent(f'''
+                import socket
+                s = socket.socket(); s.settimeout(6); s.connect(("{lab['server_ip']}", 9099))
+                buf = b""
+                try:
+                    while True:
+                        d = s.recv(4096)
+                        if not d: break
+                        buf += d
+                except Exception:
+                    pass
+                import sys; sys.stdout.write(buf.decode("latin-1"))
+            ''')
+            r = netns_exec(lab["client_ns"], "python3", "-c", cli_code, check=False)
+            return r.stdout
+        finally:
+            if bridge is not None:
+                bridge.stop()
+            if server is not None:
+                server.terminate(); server.wait(timeout=3)
+
+
+def test_seqfix_keeps_a_length_changing_flow_in_sync():
+    """flow_rewrite must keep a real multi-segment TCP flow consistent after a
+    length-changing inline edit: the grown first segment AND the untouched second
+    segment both reach the client. Without it, the flow desyncs (regression guard
+    for the reverse-ACK sign bug)."""
+    got = _run_two_segment_flow(flow_rewrite=True)
+    assert "MUCH-LONGER-REPLACEMENT" in got, f"edit not delivered: {got!r}"
+    assert "SECOND-PART-INTACT" in got, f"seq-fixup lost the 2nd segment: {got!r}"
+
+
+def test_length_change_without_seqfix_desyncs():
+    """Control: the same length-changing edit WITHOUT flow_rewrite desyncs the
+    flow, so the second segment does not make it through."""
+    got = _run_two_segment_flow(flow_rewrite=False)
+    assert "SECOND-PART-INTACT" not in got     # desynced, as expected

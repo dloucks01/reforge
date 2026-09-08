@@ -7,7 +7,7 @@ length-changing edit at its original sequence position and shifts a segment only
 by the edits that occur strictly before it:
 
   new SEQ = SEQ + sum(delta for edits in this direction with pos < SEQ)
-  new ACK = ACK + sum(delta for edits in the reverse direction with pos < ACK)
+  new ACK = ACK - sum(delta for edits in the reverse direction with pos < ACK)
 
 Edits are de-duplicated by (direction, original SEQ) so retransmissions aren't
 counted twice. Same interface as TcpSeqFixer, so it drops into apply_engine and
@@ -82,8 +82,11 @@ class FlowRewriter:
         if sseq:
             tcp.seq = (tcp.seq + sseq) % _MOD
             changed = True
+        # ACKs run the other way: the receiver acks positions in the *rewritten*
+        # (grown/shrunk) reverse stream, but the original sender expects acks in
+        # its own coordinates, so subtract the reverse-direction delta.
         sack = self._shift(_rev_key(pkt), tcp.ack)
         if sack:
-            tcp.ack = (tcp.ack + sack) % _MOD
+            tcp.ack = (tcp.ack - sack) % _MOD
             changed = True
         return changed
