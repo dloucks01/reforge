@@ -661,3 +661,56 @@ def test_seqfix_handles_a_shrinking_edit():
                                 find=b"LONG-CONTENT-TO-SHRINK", replace=b"X")
     assert "FIRST:X" in got, f"shrink not delivered: {got!r}"
     assert "SECOND-PART-INTACT" in got, f"seq-fixup lost the 2nd segment: {got!r}"
+
+
+def test_watchdog_fail_open_restores_the_wire_when_the_bridge_dies():
+    """Availability guarantee: a userspace bridge is a single point of failure —
+    if it stalls, the watchdog must trip and hand the link to a kernel bridge so
+    the wire doesn't stay dark. Proven live: connectivity works through the
+    bridge, goes dark when it stops, and the watchdog's fail-open restores it."""
+    from reforge.core.bridge import UserspaceBridge
+    from reforge.core.watchdog import Watchdog
+    from reforge.privhelper.netconfig import RevertJournal, fail_open_commands
+    from reforge.testlab.netlab import BridgeFlowLab
+
+    def ping(lab) -> bool:
+        return netns_exec(lab["client_ns"], "ping", "-c1", "-W1", lab["server_ip"],
+                          check=False).returncode == 0
+
+    bridge = wd = None
+    journal = RevertJournal()
+    with BridgeFlowLab() as lab:
+        try:
+            assert not ping(lab), "no path should exist before the bridge starts"
+
+            bridge = UserspaceBridge(lab["port_a"], lab["port_b"], armed=False)
+            bridge.start()
+            assert bridge.wait_ready(5.0)
+            time.sleep(0.3)
+            assert ping(lab), "bridge should forward"
+
+            tripped = threading.Event()
+
+            def enact():
+                fail_open_commands(lab["port_a"], lab["port_b"], journal, apply=True)
+                tripped.set()
+
+            wd = Watchdog(bridge.heartbeat_age, timeout=1.0, on_trip=enact,
+                          poll_interval=0.2)
+            wd.start()
+
+            # the bridge stalls (loop stops ticking); the watchdog must trip
+            bridge.stop(); bridge = None
+            assert tripped.wait(6.0), "watchdog never tripped on the stalled bridge"
+
+            time.sleep(1.0)
+            assert ping(lab), "fail-open kernel bridge should restore the wire"
+        finally:
+            if wd is not None:
+                wd.stop()
+            if bridge is not None:
+                bridge.stop()
+            journal.revert(lambda c: subprocess.run(c, capture_output=True, check=False))
+            from reforge.privhelper.netconfig import FAIL_BRIDGE
+            subprocess.run(["ip", "link", "del", FAIL_BRIDGE],
+                           capture_output=True, check=False)
