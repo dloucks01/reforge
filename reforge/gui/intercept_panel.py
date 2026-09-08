@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -71,6 +72,7 @@ class InterceptPanel(QWidget):
         self.on_queue_config = None    # called with (max_held, auto_release_s, overflow)
         self.on_help = None            # open the filter-syntax guide
         self.on_clear_transforms = None  # remove all promoted 'apply to all' rules
+        self.on_send_to_builder = None   # load a packet's bytes into the Builder
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
@@ -160,6 +162,8 @@ class InterceptPanel(QWidget):
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.itemSelectionChanged.connect(self._on_select)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._held_menu)
         self.queue_tabs.addTab(self.table, "Held (0)")
 
         self.sent_table = QTableWidget(0, len(SENT_COLUMNS))
@@ -170,6 +174,8 @@ class InterceptPanel(QWidget):
         self.sent_table.setSelectionMode(QTableWidget.SingleSelection)
         self.sent_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.sent_table.itemSelectionChanged.connect(self._on_sent_select)
+        self.sent_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.sent_table.customContextMenuRequested.connect(self._sent_menu)
         self.queue_tabs.addTab(self.sent_table, "Sent (0)")
         split.addWidget(self.queue_tabs)
 
@@ -689,6 +695,33 @@ class InterceptPanel(QWidget):
             self.sent_table.setItem(r, c, item)
         n_sent = self.sent_table.rowCount()
         self.queue_tabs.setTabText(1, f"Sent ({n_sent})")
+
+    def _send_to_builder(self, data) -> None:
+        if data and self.on_send_to_builder is not None:
+            self.on_send_to_builder(bytes(data))
+
+    def _held_menu(self, pos) -> None:
+        row = self.table.rowAt(pos.y())
+        if row < 0 or self.queue is None:
+            return
+        hp = self.queue.get(self.table.item(row, 0).data(Qt.UserRole))
+        menu = QMenu(self)
+        act = menu.addAction("Send to Builder (replay)")
+        act.setEnabled(hp is not None and self.on_send_to_builder is not None)
+        if menu.exec(self.table.viewport().mapToGlobal(pos)) is act and hp is not None:
+            self._send_to_builder(hp.data)
+
+    def _sent_menu(self, pos) -> None:
+        row = self.sent_table.rowAt(pos.y())
+        if row < 0:
+            return
+        item = self.sent_table.item(row, 0)
+        data = item.data(Qt.UserRole) if item else None
+        menu = QMenu(self)
+        act = menu.addAction("Send to Builder (resend)")
+        act.setEnabled(bool(data) and self.on_send_to_builder is not None)
+        if menu.exec(self.sent_table.viewport().mapToGlobal(pos)) is act and data:
+            self._send_to_builder(data)
 
     def _on_sent_select(self) -> None:
         rows = self.sent_table.selectionModel().selectedRows()

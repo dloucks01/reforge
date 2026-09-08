@@ -274,6 +274,7 @@ class MainWindow(QMainWindow):
         self.intercept_panel.on_queue_config = self._on_queue_config
         self.intercept_panel.on_help = lambda: self._open_guide("_filter")
         self.intercept_panel.on_clear_transforms = self._clear_transforms
+        self.intercept_panel.on_send_to_builder = self._send_to_builder
 
 
     def _build_shell(self) -> None:
@@ -607,6 +608,19 @@ class MainWindow(QMainWindow):
         self.intercept_panel.set_transform_count(len(self._transforms))
         desc = describe_actions(actions)
         return f"Transform added ({desc}) — applies to all matching traffic and resends."
+
+    def _send_to_builder(self, data: bytes) -> None:
+        """Load a held/sent packet into the Builder (Craft) for replay/resend."""
+        self.builder_panel.load_bytes(data)
+        self._go_workspace("craft")
+        craft = self._workspaces.get("craft")
+        tabs = craft.findChild(QTabWidget) if craft is not None else None
+        if tabs is not None:
+            for i in range(tabs.count()):
+                if tabs.tabText(i) == "Builder":
+                    tabs.setCurrentIndex(i)
+                    break
+        self.statusBar().showMessage("Loaded packet into Builder — edit and send.")
 
     def _clear_transforms(self) -> None:
         """Remove every promoted 'apply to all' transform from the live engine."""

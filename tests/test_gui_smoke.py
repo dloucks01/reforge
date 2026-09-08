@@ -455,3 +455,24 @@ def test_pane_layout_persists(app):
     win2 = MainWindow()                       # a fresh window restores the split
     assert len(win2.pane_area.panes) == 2
     assert set(win2.pane_area.layout_keys()) == {"recon", "attack"}
+
+
+def test_send_to_builder(app):
+    from reforge.core.intercept import InterceptQueue
+    from reforge.gui.main_window import MainWindow
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+    from scapy.packet import Raw
+
+    win = MainWindow()
+    q = InterceptQueue()
+    win.intercept = q
+    win.intercept_panel.set_queue(q)
+    pkt = bytes(Ether() / IP(dst="10.0.0.9") / TCP(dport=80) / Raw(b"user=admin"))
+    q.hold("ifa", pkt, lambda o: None, flow_key=("f", 1))
+    win.intercept_panel.refresh_pending()
+
+    win.intercept_panel._send_to_builder(pkt)          # replay a held packet
+    assert win.pane_area.current_key() == "craft"      # jumped to the Builder
+    built = win.builder_panel._current_bytes()
+    assert built is not None and len(built) >= len(pkt) - 4

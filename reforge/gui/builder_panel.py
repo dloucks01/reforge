@@ -308,6 +308,11 @@ class BuilderPanel(QWidget):
         self.status.setText(f"Loaded protocol '{spec.get('name')}' — now in the layer palette.")
 
     # ---- templates / capture ------------------------------------------------
+    def load_bytes(self, data: bytes) -> None:
+        """Load raw packet bytes into the builder for edit + (re)send."""
+        self.load_spec(builder.bytes_to_spec(bytes(data)))
+        self.status.setText(f"Loaded {len(data)} bytes — edit and send.")
+
     def load_spec(self, spec: dict) -> None:
         self.layers = list(spec.get("layers", []))
         self._refresh_stack(select=0)
