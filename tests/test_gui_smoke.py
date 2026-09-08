@@ -426,3 +426,32 @@ def test_intercept_sent_history(app):
     assert panel.sent_table.item(2, 1).text() == "Modified"
     assert panel.sent_table.item(2, 0).data(Qt.UserRole) is not None   # inspectable
     assert panel.sent_table.item(0, 0).data(Qt.UserRole) is None       # dropped: no bytes
+
+
+def test_stream_cells_have_tooltips(app):
+    from reforge.capture.base import Frame
+    from reforge.gui.main_window import MainWindow
+    from reforge.testlab import traffic as T
+
+    win = MainWindow()
+    data = next(d for _t, d in T.http_login() if b"POST" in d)
+    win._append_row(0.5, Frame(data=data, ingress="lab0"))
+    info = win.table.item(0, 6)
+    assert info.toolTip() == info.text() and info.toolTip()   # full text, never hidden
+
+
+def test_pane_layout_persists(app):
+    from reforge.gui.main_window import MainWindow
+    from reforge.gui.settings import settings
+
+    settings().clear()
+    win = MainWindow()
+    win._go_workspace("recon")
+    win.pane_area.split()
+    win.pane_area.show_in(win.pane_area.panes[1], "attack")
+    win.pane_area.show_in(win.pane_area.panes[0], "recon")
+    win._save_layout()
+
+    win2 = MainWindow()                       # a fresh window restores the split
+    assert len(win2.pane_area.panes) == 2
+    assert set(win2.pane_area.layout_keys()) == {"recon", "attack"}

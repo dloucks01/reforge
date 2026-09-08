@@ -274,3 +274,18 @@ class PaneArea(QWidget):
         if 0 <= pane_index < len(self.panes):
             return self.panes[pane_index].key
         return None
+
+    def layout_keys(self) -> list[str]:
+        """The workspace key shown in each pane (for persisting the layout)."""
+        return [p.key for p in self.panes if p.key]
+
+    def restore_layout(self, keys: list[str]) -> None:
+        """Rebuild the pane layout from saved keys (1 or 2 workspaces)."""
+        keys = [k for k in keys if k in self.workspaces][:2]
+        if not keys:
+            return
+        self.show_in(self.panes[0], keys[0])
+        if len(keys) == 2 and keys[1] != keys[0]:
+            self.split()
+            self.show_in(self.panes[1], keys[1])
+            self.show_in(self.panes[0], keys[0])   # leave pane 0 active

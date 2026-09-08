@@ -101,7 +101,29 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self._drain)
 
         self._load_settings()                 # restore last-used inputs
+        self._restore_layout()                # restore the pane split + workspaces
         self.statusBar().showMessage("Idle — open a pcap or start a live capture")
+
+    def _save_layout(self) -> None:
+        from reforge.gui.settings import settings
+
+        try:
+            s = settings()
+            s.setValue("shell/panes", ",".join(self.pane_area.layout_keys()))
+            s.sync()
+        except Exception:
+            log.debug("layout save failed", exc_info=True)
+
+    def _restore_layout(self) -> None:
+        from reforge.gui.settings import settings
+
+        try:
+            saved = str(settings().value("shell/panes", "") or "")
+            keys = [k for k in saved.split(",") if k]
+            if keys:
+                self.pane_area.restore_layout(keys)
+        except Exception:
+            log.debug("layout restore failed", exc_info=True)
 
     # ---- remembered settings ------------------------------------------------
     def _state_widgets(self) -> dict:
@@ -723,6 +745,7 @@ class MainWindow(QMainWindow):
         self.table.insertRow(r)
         for c, v in enumerate(values):
             item = QTableWidgetItem(v)
+            item.setToolTip(v)   # never hide: hover reveals the full cell
             item.setForeground(brush)
             if c in right:
                 item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -881,6 +904,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._save_settings()                 # remember last-used inputs
+        self._save_layout()                   # remember the pane split + workspaces
         self.stop_capture()
         for cleanup in (self.attacks_panel.stop_all, self.console_panel.stop):
             try:

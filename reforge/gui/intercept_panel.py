@@ -296,7 +296,9 @@ class InterceptPanel(QWidget):
                 for layer in scapy_tree.to_tree(Ether(data)):
                     parent = QTreeWidgetItem([layer.name, ""])
                     for f in layer.fields:
-                        parent.addChild(QTreeWidgetItem([f.name, f.human]))
+                        c = QTreeWidgetItem([f.name, f.human])
+                        c.setToolTip(0, f.name); c.setToolTip(1, f.human)
+                        parent.addChild(c)
                     self.orig_tree.addTopLevelItem(parent)
                     parent.setExpanded(True)
             except Exception:
@@ -421,6 +423,7 @@ class InterceptPanel(QWidget):
             vals = [str(hp.id), hp.ingress, proto, info, f"{now - hp.ts:.1f}s"]
             for c, v in enumerate(vals):
                 item = QTableWidgetItem(v)
+                item.setToolTip(v)
                 item.setData(Qt.UserRole, hp.id)
                 self.table.setItem(r, c, item)
         # keep the previously selected row if still present
@@ -581,6 +584,7 @@ class InterceptPanel(QWidget):
                 parent.setFlags(parent.flags() & ~Qt.ItemIsEditable)
                 for f in layer.fields:
                     child = QTreeWidgetItem([f.name, f.human])
+                    child.setToolTip(0, f.name); child.setToolTip(1, f.human)
                     child.setFlags(child.flags() | Qt.ItemIsEditable)
                     child.setData(0, _LAYER_FIELD, (layer.name, f.name))
                     parent.addChild(child)
@@ -657,7 +661,7 @@ class InterceptPanel(QWidget):
     def _short_info(self, data: bytes) -> str:
         try:
             from scapy.layers.l2 import Ether
-            return scapy_tree.summarize(Ether(data)).info[:70]
+            return scapy_tree.summarize(Ether(data)).info
         except Exception:
             return data[:40].decode("latin-1", "replace")
 
@@ -677,6 +681,7 @@ class InterceptPanel(QWidget):
         vals = [str(pid), label, info, delta, _t.strftime("%H:%M:%S")]
         for c, v in enumerate(vals):
             item = QTableWidgetItem(v)
+            item.setToolTip(v)
             if c == 1:
                 item.setForeground(QBrush(QColor(colors.get(action, "#8b93a7"))))
             if c == 0 and sent_bytes is not None:
