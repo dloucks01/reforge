@@ -244,6 +244,13 @@ class InterceptPanel(QWidget):
         buttons.addWidget(self.btn_fwd)
         buttons.addWidget(self.btn_mod)
         buttons.addWidget(self.btn_drop)
+        self.result_label = QLabel("")
+        self.result_label.setStyleSheet("font-weight: 700;")
+        self.counts_label = QLabel("")
+        self.counts_label.setStyleSheet("color: palette(mid); font-size: 10px;")
+        rrow = QHBoxLayout(); rrow.setContentsMargins(2, 0, 2, 0)
+        rrow.addWidget(self.result_label); rrow.addStretch(1); rrow.addWidget(self.counts_label)
+        elayout.addLayout(rrow)
         elayout.addLayout(buttons)
 
         split.addWidget(editor)
@@ -586,14 +593,50 @@ class InterceptPanel(QWidget):
     def _resolve(self, action: str) -> None:
         if self.queue is None or self._current_id is None:
             return
+        pid, orig = self._current_id, self._orig_bytes
         if action == "modify":
             self._sync_from_editor()            # capture the latest hex/ascii edit
-        self.queue.resolve(self._current_id, action, self._work if action == "modify" else None)
+        out = self._work if action == "modify" else None
+        self.queue.resolve(pid, action, out)
+        self._show_result(action, pid, orig, self._work)
         self._current_id = None
+        self._orig_bytes = b""
         self.tree.setVisible(True)
         self.tree.clear()
         self.hex_edit.clear()
+        self.orig_tree.clear()
+        self.orig_hex.clear()
+        self._mod_label.setText("Modified \u2014 editable")
         self._set_buttons_enabled(False)
+
+    def _describe_change(self, orig: bytes, work: bytes) -> str:
+        try:
+            from reforge.rules.derive import derive_actions, describe_actions
+
+            acts = derive_actions(orig, work, link="ether")
+            if acts:
+                return " \u2014 " + describe_actions(acts)
+        except Exception:
+            pass
+        n = sum(1 for a, b in zip(orig, work) if a != b) + abs(len(work) - len(orig))
+        return f" \u2014 {n} byte(s) changed" if n else ""
+
+    def _show_result(self, action: str, pid: int, orig: bytes, work: bytes) -> None:
+        """Persistent, colour-coded confirmation of what happened to the packet."""
+        if action == "drop":
+            self.result_label.setText(f"\u2717  Dropped #{pid} \u2014 NOT sent")
+            self.result_label.setStyleSheet("color: #ff5c6c; font-weight: 700;")
+        elif action == "modify":
+            self.result_label.setText(f"\u2713  Sent MODIFIED #{pid}{self._describe_change(orig, work)}")
+            self.result_label.setStyleSheet("color: #4d9fff; font-weight: 700;")
+        else:
+            self.result_label.setText(f"\u2713  Forwarded #{pid} unchanged")
+            self.result_label.setStyleSheet("color: #3ddc97; font-weight: 700;")
+        st = self.queue.stats if self.queue else {}
+        sent = st.get("forwarded", 0) + st.get("modified", 0)
+        self.counts_label.setText(
+            f"session \u2014 sent {sent}  \u00b7  modified {st.get('modified', 0)}"
+            f"  \u00b7  dropped {st.get('dropped', 0)}")
         self.refresh_pending()
 
     def _set_buttons_enabled(self, on: bool) -> None:

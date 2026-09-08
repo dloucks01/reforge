@@ -373,7 +373,7 @@ class MainWindow(QMainWindow):
         sv = QVBoxLayout(stream)
         sv.setContentsMargins(0, 0, 0, 0)
         sv.setSpacing(2)
-        sv.addWidget(self._region_label("TRAFFIC STREAM"))
+        sv.addWidget(self._region_label("LIVE STREAM"))
         sv.addWidget(self.table, 1)
         lower = QTabWidget()
         lower.addTab(self.intercept_panel, "Intercept")
