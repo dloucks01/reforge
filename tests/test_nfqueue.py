@@ -82,3 +82,21 @@ def test_forward_queue_rules_scope_to_victims():
     # no victims -> whole forward chain
     plain = " ".join(" ".join(c) for c in nft_forward_queue_rules(1)[0])
     assert "saddr" not in plain and "queue num 1" in plain
+
+
+def test_nfqueue_seq_fixer_shifts_later_segments():
+    from reforge.core.flowrewrite import FlowRewriter
+    from reforge.rules.actions import PayloadReplace
+    fx = FlowRewriter()
+    r = NfqueueRunner(RuleEngine([Rule("g", parse_filter('Raw.load contains "HI"'),
+                                       [PayloadReplace(b"HI", b"HELLO")])]),  # +3
+                      seq_fixer=fx)
+    # first segment grows -> fixer records the +3 delta for the flow
+    p1 = FakePkt(bytes(IP(src="10.0.0.2", dst="10.0.0.1")
+                       / TCP(sport=80, dport=5, flags="PA", seq=1000, ack=1) / b"HI-x"))
+    r.process(p1)
+    # a later segment (no rule match) must be shifted +3 by the fixer
+    p2 = FakePkt(bytes(IP(src="10.0.0.2", dst="10.0.0.1")
+                       / TCP(sport=80, dport=5, flags="PA", seq=1004, ack=1) / b"more"))
+    r.process(p2)
+    assert IP(p2.out)[TCP].seq == 1007

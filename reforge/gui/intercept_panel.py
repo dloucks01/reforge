@@ -74,6 +74,7 @@ class InterceptPanel(QWidget):
         self.on_help = None            # open the filter-syntax guide
         self.on_clear_transforms = None  # remove all promoted 'apply to all' rules
         self.on_send_to_builder = None   # load a packet's bytes into the Builder
+        self.on_length_change = None     # (delta) -> warn: interactive edit resized the packet
 
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
@@ -629,6 +630,10 @@ class InterceptPanel(QWidget):
         if action == "modify":
             self._sync_from_editor()            # capture the latest hex/ascii edit
             self._work = self._finalize_packet(self._work)   # valid checksums on the wire
+            # an interactive length change bypasses the seq-fixer (the release path
+            # sends bytes directly), so warn the operator it may desync the flow.
+            if self.on_length_change is not None and len(self._work) != len(orig):
+                self.on_length_change(len(self._work) - len(orig))
         out = self._work if action == "modify" else None
         self.queue.resolve(pid, action, out)
         self._show_result(action, pid, orig, self._work)

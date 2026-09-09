@@ -182,3 +182,19 @@ def test_hex_edit_recomputes_checksums_so_packet_is_valid(app):
     del pkt[IP].chksum, pkt[TCP].chksum
     fixed = Ether(bytes(pkt))                            # scapy recomputes here
     assert fixed[IP].chksum == good_ip and fixed[TCP].chksum == good_tcp
+
+
+def test_length_changing_edit_fires_callback(app):
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+    from scapy.packet import Raw
+    orig = bytes(Ether() / IP() / TCP(dport=80) / Raw(b"SHORT"))
+    p, _q, _ = _held(app, orig)
+    fired = {}
+    p.on_length_change = lambda delta: fired.setdefault("delta", delta)
+    # ascii edit that grows the payload
+    p.view_combo.setCurrentText("ASCII")
+    txt = p.hex_edit.toPlainText().replace("SHORT", "MUCH-LONGER")
+    p.hex_edit.setPlainText(txt)
+    p._resolve("modify")
+    assert fired.get("delta") == len(b"MUCH-LONGER") - len(b"SHORT")   # +6

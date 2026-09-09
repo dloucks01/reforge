@@ -296,6 +296,7 @@ class MainWindow(QMainWindow):
         self.intercept_panel.on_help = lambda: self._open_guide("_filter")
         self.intercept_panel.on_clear_transforms = self._clear_transforms
         self.intercept_panel.on_send_to_builder = self._send_to_builder
+        self.intercept_panel.on_length_change = self._on_intercept_length_change
 
 
     def _build_shell(self) -> None:
@@ -587,7 +588,7 @@ class MainWindow(QMainWindow):
         self.intercept_panel.set_transform_count(len(self._transforms))
         armed = self.act_arm.isChecked()
         bridge = UserspaceBridge(a, b, engine, intercept=self.intercept, armed=armed,
-                                 flow_rewrite=self.act_seqfix.isChecked(),
+                                 flow_rewrite=self._auto_arm_seqfix(),
                                  checksum_fixup=self.act_csum.isChecked())
         state = "ARMED" if armed else "pass-through (safe)"
         warn = self._inline_preflight_warning([a, b])   # includes NIC offloads on a/b
@@ -712,6 +713,30 @@ class MainWindow(QMainWindow):
         self.intercept_panel.set_transform_count(0)
         self.statusBar().showMessage("Cleared all interactive transforms.")
 
+    def _on_intercept_length_change(self, delta: int) -> None:
+        """An interactive edit resized the packet. The intercept release path
+        bypasses the seq-fixer, so this one edit can't be kept in sync — warn
+        rather than pretend a toggle would help (use a rule for auto seq-fix)."""
+        sign = f"+{delta}" if delta > 0 else str(delta)
+        self.engagement.log("seqfix", f"length-changing interactive edit ({sign} bytes)")
+        self.statusBar().showMessage(
+            f"⚠ edit changed length by {sign} bytes — an interactive length change "
+            "isn't seq-fixed and may desync this flow. Prefer a same-length edit, or a "
+            "rule (rules are auto seq-fixed).")
+
+    def _auto_arm_seqfix(self) -> bool:
+        """Turn on TCP seq/ack fix-up when the rule set has a length-changing
+        action — a grow/shrink edit desyncs the flow otherwise. Returns whether
+        fix-up is on (respecting an operator who already enabled it)."""
+        from reforge.rules.spec import rules_change_length
+        if not self.act_seqfix.isChecked() and rules_change_length(self.rules_panel.specs):
+            self.act_seqfix.setChecked(True)
+            self.engagement.log("seqfix", "auto-armed (a rule changes payload length)")
+            self.statusBar().showMessage(
+                "Auto-enabled TCP seq-fix — a rule changes payload length, so the flow "
+                "is kept in sync.")
+        return self.act_seqfix.isChecked()
+
     def _inline_preflight_warning(self, ifaces: list | None = None) -> str:
         """Run the inline preflight; return a one-line warning naming any host-level
         blocker (FORWARD DROP, strict rp_filter, missing NFQUEUE, NIC offloads) that
@@ -746,7 +771,12 @@ class MainWindow(QMainWindow):
         install, self._nfq_remove = nft_forward_queue_rules(1, victims or None)
         for cmd in install:
             subprocess.run(cmd, capture_output=True, check=False)
-        self._nfq_runner = NfqueueRunner(engine, queue_num=1, intercept=queue)
+        seq_fixer = None
+        if self._auto_arm_seqfix():          # keep flows in sync on length-changing edits
+            from reforge.core.flowrewrite import FlowRewriter
+            seq_fixer = FlowRewriter()
+        self._nfq_runner = NfqueueRunner(engine, queue_num=1, intercept=queue,
+                                         seq_fixer=seq_fixer)
         self._nfq_thread = threading.Thread(target=self._nfq_runner.run, daemon=True)
         self._nfq_thread.start()
         self.engagement.log("mitm-inline", "NFQUEUE victims: " + ", ".join(victims or []))

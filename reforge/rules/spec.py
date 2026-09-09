@@ -131,3 +131,26 @@ def action_summary(spec: dict) -> str:
     if t.startswith("http_"):
         return t.replace("http_", "http:").replace("_", "-")
     return t
+
+
+# --- length-change detection (for auto-arming seq/ack fix-up) ----------------
+_LENGTH_CHANGING_TYPES = {"strip_starttls"}
+
+
+def action_changes_length(spec: dict) -> bool:
+    """Would this action change a TCP payload's length? Such an edit desyncs the
+    stream unless seq/ack fix-up is on, so the GUI uses this to auto-arm it."""
+    t = spec.get("type", "")
+    if t in _LENGTH_CHANGING_TYPES or t.startswith("http_"):
+        return True          # HTTP transforms (inject, sslstrip, strip, replace) resize
+    if t == "payload_replace":
+        from reforge.rules.actions import _as_bytes
+        return len(_as_bytes(spec.get("find", ""))) != len(_as_bytes(spec.get("replace", "")))
+    return False             # set_field / drop / hold / delay / duplicate / fuzz keep length
+
+
+def rules_change_length(specs: list[dict]) -> bool:
+    """True if any enabled rule carries a length-changing action."""
+    return any(action_changes_length(a)
+               for r in specs if r.get("enabled", True)
+               for a in r.get("actions", []))

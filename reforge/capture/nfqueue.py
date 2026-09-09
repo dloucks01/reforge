@@ -37,10 +37,12 @@ class NfqStats:
 
 
 class NfqueueRunner:
-    def __init__(self, engine: RuleEngine, queue_num: int = 1, intercept=None):
+    def __init__(self, engine: RuleEngine, queue_num: int = 1, intercept=None,
+                 seq_fixer=None):
         self.engine = engine
         self.queue_num = queue_num
         self.intercept = intercept   # optional InterceptQueue for interactive HOLD
+        self.seq_fixer = seq_fixer   # keeps TCP flows in sync after length-changing edits
         self.stats = NfqStats()
         self._nfq = None
         self._running = False
@@ -69,7 +71,7 @@ class NfqueueRunner:
         self.stats.seen += 1
         try:
             raw = nfq_packet.get_payload()
-            res = apply_engine(self.engine, raw, link="ip")
+            res = apply_engine(self.engine, raw, link="ip", seq_fixer=self.seq_fixer)
         except Exception:
             self.stats.errors += 1
             log.exception("engine error; accepting packet unchanged")

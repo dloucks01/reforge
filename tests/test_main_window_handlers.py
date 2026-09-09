@@ -232,3 +232,32 @@ def test_inline_preflight_passes_ifaces_for_offloads(app, monkeypatch):
     monkeypatch.setattr(D, "inline_blockers", fake)
     win._inline_preflight_warning(["ethA", "ethB"])
     assert seen["ifaces"] == ["ethA", "ethB"]
+
+
+def test_auto_arm_seqfix_on_length_changing_rule(app):
+    win = _win(app)
+    win.act_seqfix.setChecked(False)
+    # a same-length rule -> not auto-armed
+    win.rules_panel.specs[:] = [{"enabled": True, "match": {"type": "all"},
+        "actions": [{"type": "payload_replace", "find": "aa", "replace": "bb"}]}]
+    assert win._auto_arm_seqfix() is False and win.act_seqfix.isChecked() is False
+    # a length-changing rule -> auto-armed + noted
+    win.rules_panel.specs[:] = [{"enabled": True, "match": {"type": "all"},
+        "actions": [{"type": "payload_replace", "find": "hi", "replace": "hello"}]}]
+    assert win._auto_arm_seqfix() is True and win.act_seqfix.isChecked() is True
+    assert any(e.kind == "seqfix" for e in win.engagement.events)
+
+
+def test_auto_arm_respects_operator_choice(app):
+    win = _win(app)
+    win.act_seqfix.setChecked(True)              # operator already on
+    win.rules_panel.specs[:] = []                # no length-changing rule
+    assert win._auto_arm_seqfix() is True        # stays on
+
+
+def test_intercept_length_change_warns(app):
+    win = _win(app)
+    win._on_intercept_length_change(+7)
+    msg = win.statusBar().currentMessage()
+    assert "+7 bytes" in msg and "desync" in msg
+    assert any(e.kind == "seqfix" for e in win.engagement.events)

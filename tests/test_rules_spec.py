@@ -116,3 +116,16 @@ def test_action_summaries():
     assert S.action_summary({"type": "http_sslstrip"}) == "http:sslstrip"
     assert S.action_summary({"type": "http_replace_body"}) == "http:replace-body"
     assert "http:inject" in S.action_summary({"type": "http_inject", "snippet": "<script>"})
+
+
+def test_rules_change_length_detector():
+    from reforge.rules.spec import action_changes_length, rules_change_length
+    assert action_changes_length({"type": "payload_replace", "find": "hi", "replace": "hello"})
+    assert not action_changes_length({"type": "payload_replace", "find": "aa", "replace": "bb"})
+    assert action_changes_length({"type": "http_inject", "snippet": "<x>"})
+    assert action_changes_length({"type": "strip_starttls"})
+    assert not action_changes_length({"type": "set_field", "layer": "IP", "field": "dst", "value": "1.1.1.1"})
+    assert not action_changes_length({"type": "drop"})
+    assert rules_change_length([{"enabled": True, "actions": [{"type": "http_sslstrip"}]}])
+    assert not rules_change_length([{"enabled": False, "actions": [{"type": "http_sslstrip"}]}])
+    assert not rules_change_length([{"enabled": True, "actions": [{"type": "duplicate", "times": 2}]}])
