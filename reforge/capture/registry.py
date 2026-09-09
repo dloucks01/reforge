@@ -6,6 +6,8 @@ and to auto-select a viable one for a chosen link speed.
 
 from __future__ import annotations
 
+import logging
+
 from reforge.capture.afpacket import AfPacketBackend
 from reforge.capture.base import CaptureBackend
 from reforge.capture.pcap import PcapFileBackend
@@ -90,6 +92,9 @@ def list_interfaces() -> list[str]:
 
         return sorted(i for i in get_if_list() if i != "lo") or ["lo"]
     except Exception:
+        # don't mask a Scapy problem as "no interfaces" — say so
+        logging.getLogger("reforge.registry").warning(
+            "could not enumerate interfaces", exc_info=True)
         return []
 
 

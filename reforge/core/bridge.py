@@ -191,8 +191,9 @@ class UserspaceBridge:
             fk = self._flow_key(ingress, data)
             if self.intercept.passthrough(ingress, out,
                                           self._egress_release(ingress, send_peer, data), fk):
-                if res.modified:
-                    self.counters.modified += 1
+                # NB: don't count `modified` here — the release closure counts it
+                # when the queued packet is actually sent (out != orig), so counting
+                # at queue time too would double it.
                 for extra in res.extra:
                     self.intercept.passthrough(ingress, extra,
                                                self._inject_release(ingress, send_peer), fk) \

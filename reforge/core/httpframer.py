@@ -47,8 +47,24 @@ def _chunked_end(buf: bytes, start: int) -> int | None:
 
 
 class HttpFramer:
-    def __init__(self):
+    # Cap the buffer so a peer that never terminates a message (a no-Content-Length
+    # keep-alive response, a header block with no blank line, a Content-Length that
+    # never arrives) can't grow it without bound.
+    _MAX_BUFFER = 32 * 1024 * 1024
+
+    def __init__(self, max_buffer: int | None = None):
         self.buf = bytearray()
+        self.max_buffer = max_buffer or self._MAX_BUFFER
+
+    def _capped(self) -> bytes | None:
+        """None while a message is still incomplete — unless the buffer has grown
+        past the cap, in which case emit what we have and reset (the overflow
+        safety valve)."""
+        if len(self.buf) >= self.max_buffer:
+            msg = bytes(self.buf)
+            self.buf.clear()
+            return msg
+        return None
 
     def feed(self, data: bytes) -> list[bytes]:
         """Add bytes; return any complete HTTP messages now available."""
@@ -64,7 +80,7 @@ class HttpFramer:
     def _extract(self) -> bytes | None:
         i = self.buf.find(_HEADER_END)
         if i == -1:
-            return None
+            return self._capped()             # headers not yet complete
         header_block = bytes(self.buf[:i])
         body_start = i + 4
         is_response = header_block[:5] == b"HTTP/"
@@ -75,7 +91,7 @@ class HttpFramer:
         if "chunked" in te:
             end = _chunked_end(bytes(self.buf), body_start)
             if end is None:
-                return None
+                return self._capped()
             msg_end = end
         elif cl is not None:
             try:
@@ -83,13 +99,14 @@ class HttpFramer:
             except ValueError:
                 need = body_start
             if len(self.buf) < need:
-                return None
+                return self._capped()
             msg_end = need
         elif is_response:
             # A response with no Content-Length/chunked is delimited by connection
             # close: keep buffering the whole thing (headers + body) and emit it as
-            # one message on flush(), so transforms see the full body.
-            return None
+            # one message on flush(), so transforms see the full body — bounded
+            # by the buffer cap.
+            return self._capped()
         else:
             # A request with no Content-Length/chunked has no body.
             msg_end = body_start

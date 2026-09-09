@@ -278,8 +278,32 @@ suite grew from 609 to 649 passing.
 - _dry_run_over_capture still iterates the whole capture synchronously on click.
 - The no-helper (root GUI) nft fallback still applies synchronously (see §3.8).
 
-**Not yet addressed** (lower priority / larger)
+**Low-priority findings — done**
 
-- §2.4 credential types (IMAP/LDAP/Telnet/NTLM/Kerberos/Digest), §2.6 RA flooding
-  + dead RogueRouter, §3.10 console plaintext bind, §3.11 swallowed stop errors,
-  §3.13 unbounded HTTP buffer, §3.16 SNI-derived filename, and the remaining LOWs.
+- **§3.16** — SNI-derived cert filenames sanitized (`_safe_name`: strip separators
+  + hash), so a crafted SNI can't escape the temp dir.
+- **§3.13** — HttpFramer now caps the buffer on every incomplete path, so a peer
+  that never terminates a message can't grow it without bound.
+- **§3.17** — the helper checks `SO_PEERCRED` and refuses any peer that isn't root
+  or its own uid (defense-in-depth over the 0600 socket); nft idempotency and the
+  read bound were already fixed in the item-2/item-1 work.
+- **§3.10** — the console collector binds loopback when mTLS is off (only exposes
+  on all interfaces under client-cert auth).
+- **§3.11** — attack teardown failures are logged and surfaced: ARP/NDP stops show
+  a red "restore FAILED — check the target's cache" instead of a false success.
+- **§3.15** — `ndp_mitm` sets `our_ip` in prepare(); the bridge no longer
+  double-counts `modified` on the held-flow passthrough branch.
+- **§3.14** — `warmup()` and `list_interfaces()` log a warning instead of hiding a
+  broken Scapy import as success / "no interfaces".
+- **§2.6** — added real IPv6 RA flooding (`ra_flood_packets`, `RaFlood`) and wired
+  both `RogueRouter` and `RaFlood` into scenario steps, so neither is dead code.
+- **§2.4 (partial)** — fixed the broken IMAP parser (tagged `LOGIN` +
+  `AUTHENTICATE LOGIN`) and added HTTP Digest capture.
+- **§3.18** — documented (no behavior change) why `strip_starttls` is listed as
+  length-changing (defensive seq/ack arming).
+
+**Still open** (larger efforts, not LOW)
+
+- §2.4 remainder: LDAP simple-bind (BER decode), Telnet (char-at-a-time),
+  NTLMSSP and Kerberos hash capture — each a real feature, not a one-liner.
+- §2.8 built-in custom dissectors, §4 wireless / real fast-path data plane.

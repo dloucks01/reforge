@@ -75,14 +75,18 @@ class ConsolePanel(QWidget):
             self._mtls = dev_mtls()
             server_ctx = self._mtls[0]
         self._collector = Collector()
+        # Only expose on all interfaces when client-cert auth (mTLS) protects the
+        # port; a plaintext collector is bound to loopback so it can't be reached
+        # (or its reported credentials read) from the network without a tunnel.
+        bind_host = "0.0.0.0" if server_ctx else "127.0.0.1"
         try:
-            self._server = CollectorServer(self._collector, bind=("0.0.0.0", self.port.value()),
+            self._server = CollectorServer(self._collector, bind=(bind_host, self.port.value()),
                                            ssl_context=server_ctx)
             port = self._server.start()
         except Exception as exc:
             self.summary.setText(f"error: {explain(exc)}"); return
         self._poll.start()
-        mode = "mTLS" if server_ctx else "PLAINTEXT (bind loopback or tunnel!)"
+        mode = "mTLS on all interfaces" if server_ctx else "plaintext, loopback only"
         self.summary.setText(f"Collector on :{port} [{mode}] — waiting for sensors")
 
     def stop(self):

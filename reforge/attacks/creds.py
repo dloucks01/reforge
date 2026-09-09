@@ -111,6 +111,15 @@ class CredentialExtractor:
             except Exception:
                 pass
 
+        # Digest auth — capture username + response hash (crackable offline)
+        dm = re.search(r"[Aa]uthorization:\s*Digest\s+([^\r\n]+)", text)
+        if dm:
+            params = dict(re.findall(r'(\w+)="?([^",\r\n]+)"?', dm.group(1)))
+            if params.get("username") and params.get("response"):
+                out.append(Credential("http-digest", "HTTP", src, dst,
+                                      params["username"], params["response"],
+                                      f"Digest realm={params.get('realm', '')}"))
+
         # Cookies (session tokens)
         for cm in re.finditer(r"[Cc]ookie:\s*([^\r\n]+)", text):
             out.append(Credential("cookie", "HTTP", src, dst, secret=cm.group(1).strip(),
@@ -140,6 +149,19 @@ class CredentialExtractor:
             if not line:
                 continue
             up = line.upper()
+
+            # IMAP tagged commands (the code below keys on POP3/FTP syntax, which
+            # IMAP does not use): "<tag> LOGIN user pass" or "<tag> AUTHENTICATE LOGIN".
+            if proto == "IMAP":
+                toks = line.split()
+                if len(toks) >= 4 and toks[1].upper() == "LOGIN":
+                    out.append(Credential("imap", "IMAP", src, dst,
+                                          toks[2].strip('"'), toks[3].strip('"'), "LOGIN"))
+                    continue
+                if len(toks) >= 3 and toks[1].upper() == "AUTHENTICATE" \
+                        and toks[2].upper() == "LOGIN":
+                    flow["auth"] = "user"        # base64 user/pass follow (handled below)
+                    continue
 
             # FTP / POP3 USER + PASS
             if up.startswith("USER "):

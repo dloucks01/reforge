@@ -9,6 +9,10 @@ at process entry points and before any packet parsing.
 
 from __future__ import annotations
 
+import logging
+
+log = logging.getLogger("reforge.scapy_init")
+
 _DONE = False
 
 
@@ -24,5 +28,8 @@ def warmup() -> None:
         import scapy.layers.l2  # noqa: F401
         import scapy.layers.snmp  # noqa: F401
     except Exception:
-        pass
+        # A partial/broken Scapy import is exactly the failure warmup exists to
+        # prevent (non-deterministic dissection). Surface it rather than hiding it.
+        log.warning("scapy layer warmup failed; dissection may be non-deterministic",
+                    exc_info=True)
     _DONE = True

@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+import struct
 
 from reforge.constants import HELPER_SOCKET, ensure_dirs
 from reforge.logging_setup import setup_logging
@@ -38,6 +39,21 @@ log = logging.getLogger("reforge.helper")
 # Cap the per-request read so a client that never sends a newline can't make the
 # helper buffer without bound.
 _MAX_REQUEST = 1 << 20
+
+
+def _peer_authorized(conn: socket.socket) -> bool:
+    """Defense-in-depth on top of the root-owned 0600 socket: verify the peer is
+    the helper's own uid or root via SO_PEERCRED, and refuse anyone else. If the
+    credential can't be read, refuse (fail closed)."""
+    peercred = getattr(socket, "SO_PEERCRED", None)
+    if peercred is None:                          # non-Linux: rely on socket perms
+        return True
+    try:
+        raw = conn.getsockopt(socket.SOL_SOCKET, peercred, struct.calcsize("3i"))
+        _pid, uid, _gid = struct.unpack("3i", raw)
+    except OSError:
+        return False
+    return uid == 0 or uid == os.geteuid()
 
 
 class Helper:
@@ -115,6 +131,9 @@ class Helper:
             while True:
                 conn, _ = srv.accept()
                 with conn:
+                    if not _peer_authorized(conn):
+                        log.warning("rejected helper connection from unauthorized peer")
+                        continue
                     buf = b""
                     while not buf.endswith(b"\n"):
                         chunk = conn.recv(4096)

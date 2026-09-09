@@ -6,6 +6,7 @@ For authorized testing only.
 
 from __future__ import annotations
 
+import logging
 import threading
 
 from PySide6.QtCore import Qt, QTimer
@@ -31,6 +32,25 @@ from PySide6.QtWidgets import (
 
 from reforge.capture.registry import list_interfaces
 from reforge.gui.errors import explain
+
+log = logging.getLogger("reforge.attacks_panel")
+
+
+def _safe_stop(fn, what: str, on_event=None) -> str:
+    """Stop a runner, never raising. Returns "" on success or a short error string;
+    logs the failure and records it on the engagement timeline so a teardown that
+    left state behind (e.g. un-restored ARP caches) isn't silent."""
+    try:
+        fn()
+        return ""
+    except Exception as exc:                 # noqa: BLE001 - report, don't crash the UI
+        log.warning("%s teardown failed", what, exc_info=True)
+        if on_event is not None:
+            try:
+                on_event("teardown-error", f"{what}: {exc}")
+            except Exception:
+                pass
+        return explain(exc)
 
 
 def _ifaces():
@@ -319,19 +339,18 @@ class AttacksPanel(QWidget):
             self.on_event("mitm-stop", "ARP caches restored")
             self._arp_logged = False
         if self._inline_started and self.on_stop_inline is not None:
-            try:
-                self.on_stop_inline()
-            except Exception:
-                pass
+            _safe_stop(self.on_stop_inline, "inline NFQUEUE", self.on_event)
             self._inline_started = False
         if self._arp:
-            try:
-                self._arp.stop()
-            except Exception:
-                pass
+            err = _safe_stop(self._arp.stop, "ARP restore", self.on_event)
             self._arp = None
-            self.arp_status.setText("Stopped — ARP caches restored.")
-            self.arp_status.setStyleSheet("")
+            if err:
+                self.arp_status.setText(f"Stopped, but restore FAILED ({err}) — "
+                                        "check the target's ARP cache.")
+                self.arp_status.setStyleSheet("color:#c0392b; font-weight:600;")
+            else:
+                self.arp_status.setText("Stopped — ARP caches restored.")
+                self.arp_status.setStyleSheet("")
 
     # ---- DNS ----------------------------------------------------------------
     def _dns_box(self) -> QGroupBox:
@@ -377,10 +396,7 @@ class AttacksPanel(QWidget):
 
     def _dns_stop(self):
         if self._dns:
-            try:
-                self._dns.stop()
-            except Exception:
-                pass
+            _safe_stop(self._dns.stop, "DNS spoof", self.on_event)
             self._dns = None
             self.dns_status.setText("stopped")
 
@@ -412,10 +428,7 @@ class AttacksPanel(QWidget):
 
     def _name_stop(self):
         if self._name:
-            try:
-                self._name.stop()
-            except Exception:
-                pass
+            _safe_stop(self._name.stop, "name poisoner", self.on_event)
             self._name = None
             self.name_status.setText("stopped")
 
@@ -456,10 +469,7 @@ class AttacksPanel(QWidget):
 
     def _dhcp_stop(self):
         if self._dhcp:
-            try:
-                self._dhcp.stop()
-            except Exception:
-                pass
+            _safe_stop(self._dhcp.stop, "DHCP", self.on_event)
             self._dhcp = None
             self.dhcp_status.setText("stopped")
 
@@ -615,13 +625,15 @@ class AttacksPanel(QWidget):
             self.on_event("mitm-stop", "NDP caches restored")
             self._ndp_logged = False
         if self._ndp:
-            try:
-                self._ndp.stop()
-            except Exception:
-                pass
+            err = _safe_stop(self._ndp.stop, "NDP restore", self.on_event)
             self._ndp = None
-            self.ndp_status.setText("Stopped — neighbor caches restored.")
-            self.ndp_status.setStyleSheet("")
+            if err:
+                self.ndp_status.setText(f"Stopped, but restore FAILED ({err}) — "
+                                        "check the target's neighbor cache.")
+                self.ndp_status.setStyleSheet("color:#c0392b; font-weight:600;")
+            else:
+                self.ndp_status.setText("Stopped — neighbor caches restored.")
+                self.ndp_status.setStyleSheet("")
 
     def _tls_box(self) -> QGroupBox:
         box = QGroupBox("TLS interception (certificate-injection MITM)")
@@ -666,10 +678,7 @@ class AttacksPanel(QWidget):
 
     def _tls_stop(self):
         if self._tls:
-            try:
-                self._tls.stop()
-            except Exception:
-                pass
+            _safe_stop(self._tls.stop, "TLS intercept", self.on_event)
             self._tls = None
             self.tls_status.setText("stopped")
 
@@ -790,10 +799,7 @@ class AttacksPanel(QWidget):
 
     def _tcp_stop(self):
         if self._tcp:
-            try:
-                self._tcp.stop()
-            except Exception:
-                pass
+            _safe_stop(self._tcp.stop, "TCP proxy", self.on_event)
             self._tcp = None
             self.tp_status.setText("stopped")
 
