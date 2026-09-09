@@ -109,7 +109,7 @@ Reference numbers: PF_RING+DPDK ≈ 14.88 Mpps (line rate) at ~8% of one core, v
 - **Multicast & broadcast (in scope):** unicast, **multicast, and broadcast** all handled for capture, manipulation, and crafting. Includes L2 broadcast/multicast MAC framing, IPv4 multicast + **IGMPv1/2/3**, IPv6 multicast + **MLDv1/2**, and broadcast-based protocols (ARP, DHCP discover, NetBIOS, mDNS/LLMNR, SSDP). Group membership and BUM (Broadcast/Unknown-unicast/Multicast) traffic can be observed, rewritten, dropped, injected, or replayed like any other frame.
 - **App layer:** DNS, DHCP/DHCPv6, HTTP, TLS (metadata/SNI), mDNS, LLMNR, SSDP, NTP, SNMP, SMB, and more via Scapy contrib.
 - **Non-IP / L2 control:** STP/RSTP, LLDP, CDP, LACP, ARP, EAPOL/802.1X.
-- **Industrial / OT:** Modbus, DNP3, S7comm, EtherNet/IP/CIP, PROFINET, EtherCAT, IEC-104, BACnet (Scapy contrib as the seed; extend as needed).
+- **Industrial / OT:** Modbus, DNP3, S7comm, EtherNet/IP/CIP, PROFINET, EtherCAT, IEC-104, BACnet (Scapy contrib as the seed; extend as needed). *Built-in header dissectors for Modbus/TCP, DNP3, BACnet/IP, IEC-104, EtherNet/IP, TPKT ship in `reforge/dissect/builtins.py`.*
 - **Custom/proprietary dissectors:** operator-defined field layouts, enums, and length semantics so any protocol gets the same tree-view + field-level manipulation as built-ins. A dissector-definition format (declarative + Python escape hatch) is a core deliverable given "all protocols matter."
 
 ### 4.5 Fuzzing & mutation

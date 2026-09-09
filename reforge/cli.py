@@ -67,6 +67,10 @@ def main(argv: list[str] | None = None) -> int:
 
     from reforge.core.scapy_init import warmup
     warmup()
+    # ship the built-in ICS/OT dissectors (Modbus, DNP3, BACnet, IEC-104,
+    # EtherNet/IP, TPKT) so their fields dissect and edit like any built-in
+    from reforge.dissect.builtins import load_builtins
+    load_builtins()
 
     command = args.command or "gui"
 
