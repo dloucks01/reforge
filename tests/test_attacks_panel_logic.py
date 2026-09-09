@@ -80,3 +80,31 @@ def test_ndp_status_rendering(app):
                           "router": "fd00::1", "relayed": 3, "sent": 20,
                           "unresolved": []})
     assert "NDP MITM ACTIVE" in p.ndp_status.text()
+
+
+def test_activity_formatters_distinguish_dead_from_working(app):
+    from reforge.gui.attacks_panel import AttacksPanel as P
+    # DNS: not on-path / seeing-not-matching / working
+    assert P._fmt_dns({"seen": 0, "answered": 0, "mappings": 2})[1] is False
+    t, live = P._fmt_dns({"seen": 5, "answered": 0, "mappings": 2})
+    assert live is False and "0 matched" in t
+    assert P._fmt_dns({"seen": 5, "answered": 3, "mappings": 2})[1] is True
+    # name poisoning
+    assert P._fmt_name({"seen": 0, "poisoned": 0})[1] is False
+    assert P._fmt_name({"seen": 4, "poisoned": 2})[1] is True
+    # rogue dhcp
+    assert P._fmt_dhcp({"discovers": 0, "offered": 0, "requests": 0, "leased": 0})[1] is False
+    t, live = P._fmt_dhcp({"discovers": 2, "offered": 2, "requests": 1, "leased": 1})
+    assert live is True and "leased 1" in t
+
+
+def test_poll_activity_updates_status_from_a_runner(app):
+    p = _panel(app)
+
+    class FakeDns:
+        def status(self):
+            return {"seen": 7, "answered": 4, "mappings": 1}
+
+    p._dns = FakeDns()
+    p._poll_activity()                       # must not raise; updates the label
+    assert "seen 7" in p.dns_status.text() and "answered 4" in p.dns_status.text()

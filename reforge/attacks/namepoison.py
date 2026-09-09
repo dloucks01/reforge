@@ -107,7 +107,8 @@ class NamePoisoner:  # pragma: no cover (needs root + live traffic)
         self.iface = iface
         self.our_ip = our_ip
         self._sniffer = None
-        self.poisoned = 0
+        self.seen = 0        # LLMNR/mDNS/NBT-NS queries observed
+        self.poisoned = 0    # queries we answered with our IP
 
     def _on(self, pkt):
         from scapy.sendrecv import send
@@ -115,12 +116,17 @@ class NamePoisoner:  # pragma: no cover (needs root + live traffic)
         try:
             if queried_name(pkt) is None:
                 return
+            self.seen += 1
             resp = build_response(pkt, self.our_ip)
         except Exception:            # a hostile query must never kill the loop
             return
         if resp is not None:
             send(resp, iface=self.iface, verbose=False)
             self.poisoned += 1
+
+    def status(self) -> dict:
+        return {"running": self._sniffer is not None,
+                "seen": self.seen, "poisoned": self.poisoned}
 
     def start(self) -> None:
         from scapy.sendrecv import AsyncSniffer

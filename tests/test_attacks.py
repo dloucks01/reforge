@@ -102,3 +102,69 @@ def test_llmnr_poison_response():
     assert resp is not None
     assert resp[DNS].an[0].rdata == "10.0.0.66"
     assert resp[UDP].sport == 5355 and resp[UDP].dport == 50000  # back to the querier
+
+
+# ---- "what landed" activity counters --------------------------------------
+def test_dns_spoofer_seen_and_answered_counters():
+    from scapy.layers.dns import DNS, DNSQR
+    from scapy.layers.inet import IP, UDP
+    from scapy.layers.l2 import Ether
+    import scapy.sendrecv as SR
+    from reforge.attacks.dns_spoof import DnsSpoofer
+
+    sp = DnsSpoofer("lo", {"*.corp.local": "10.0.0.66"})
+    orig = SR.send; SR.send = lambda *a, **k: None
+    try:
+        # a matching query -> seen + answered
+        q = Ether() / IP() / UDP(dport=53) / DNS(rd=1, qd=DNSQR(qname="intranet.corp.local"))
+        sp._on(Ether(bytes(q)))
+        # a query we don't have a mapping for -> seen but NOT answered
+        q2 = Ether() / IP() / UDP(dport=53) / DNS(rd=1, qd=DNSQR(qname="unmapped.example"))
+        sp._on(Ether(bytes(q2)))
+    finally:
+        SR.send = orig
+    st = sp.status()
+    assert st["seen"] == 2 and st["answered"] == 1     # on-path, one match
+
+
+def test_namepoisoner_seen_and_poisoned_counters():
+    from scapy.layers.dns import DNS, DNSQR
+    from scapy.layers.inet import IP, UDP
+    from scapy.layers.l2 import Ether
+    import scapy.sendrecv as SR
+    from reforge.attacks.namepoison import NamePoisoner
+
+    np = NamePoisoner("lo", "10.0.0.66")
+    orig = SR.send; SR.send = lambda *a, **k: None
+    try:
+        q = Ether() / IP() / UDP(dport=5355) / DNS(rd=1, qd=DNSQR(qname="wpad"))
+        np._on(Ether(bytes(q)))
+        np._on(Ether() / IP() / UDP(dport=53) / DNS(rd=1, qd=DNSQR(qname="x")))  # not LLMNR/mDNS/NBT
+    finally:
+        SR.send = orig
+    st = np.status()
+    assert st["seen"] == 1 and st["poisoned"] == 1
+
+
+def test_rogue_dhcp_activity_counters():
+    from scapy.layers.dhcp import DHCP
+    from scapy.layers.l2 import Ether
+    import scapy.sendrecv as SR
+    from reforge.attacks import dhcp as D
+
+    rogue = D.RogueDhcp("lo", "10.0.0.1", pool_base="10.0.0.", pool_start=200)
+    orig = SR.sendp; SR.sendp = lambda *a, **k: None
+    try:
+        mac = "02:aa:bb:cc:dd:ee"
+        rogue._on(Ether(bytes(D.build_discover(mac, xid=0x99))))
+        req = Ether(bytes(D.build_discover(mac, xid=0x99)))
+        for i, o in enumerate(req[DHCP].options):
+            if isinstance(o, tuple) and o[0] == "message-type":
+                req[DHCP].options[i] = ("message-type", 3)
+        rogue._on(Ether(bytes(req)))
+    finally:
+        SR.sendp = orig
+    st = rogue.status()
+    assert st["discovers"] == 1 and st["offered"] == 1
+    assert st["requests"] == 1 and st["leased"] == 1
+    assert st["leases"] == {mac: "10.0.0.200"}

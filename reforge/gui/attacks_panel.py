@@ -85,6 +85,54 @@ class AttacksPanel(QWidget):
         root.addWidget(self._tcpproxy_box())
         root.addStretch(1)
 
+        # Live "what landed" poll: a sniff-based attack that sends but never sees
+        # a query looks identical to a working one. Surface seen-vs-acted so a
+        # dead attack (0 seen = not on-path; seen>0 acted=0 = not matching) reads
+        # at a glance.
+        self._activity_timer = QTimer(self)
+        self._activity_timer.setInterval(800)
+        self._activity_timer.timeout.connect(self._poll_activity)
+        self._activity_timer.start()
+
+    def _poll_activity(self) -> None:
+        for runner, label, fmt in (
+            (self._dns, getattr(self, "dns_status", None), self._fmt_dns),
+            (self._name, getattr(self, "name_status", None), self._fmt_name),
+            (self._dhcp, getattr(self, "dhcp_status", None), self._fmt_dhcp),
+        ):
+            if runner is None or label is None or not hasattr(runner, "status"):
+                continue
+            try:
+                text, live = fmt(runner.status())
+            except Exception:
+                continue
+            label.setText(text)
+            label.setStyleSheet("color:#3ddc97; font-weight:600;" if live
+                                else "color:#e6b84d;")
+
+    @staticmethod
+    def _fmt_dns(st: dict) -> tuple[str, bool]:
+        seen, ans = st["seen"], st["answered"]
+        if seen == 0:
+            return (f"⚠ no DNS queries seen — are you on-path? ({st['mappings']} mappings)", False)
+        if ans == 0:
+            return (f"⚠ {seen} queries seen but 0 matched your map — check the hostmap", False)
+        return (f"● spoofing — seen {seen} · answered {ans}", True)
+
+    @staticmethod
+    def _fmt_name(st: dict) -> tuple[str, bool]:
+        seen, po = st["seen"], st["poisoned"]
+        if seen == 0:
+            return ("⚠ no LLMNR/mDNS/NBT-NS queries seen yet", False)
+        return (f"● poisoning — seen {seen} · answered {po}", po > 0)
+
+    @staticmethod
+    def _fmt_dhcp(st: dict) -> tuple[str, bool]:
+        d, o, r, le = st["discovers"], st["offered"], st["requests"], st["leased"]
+        if d == 0:
+            return ("⚠ no DHCP DISCOVERs seen — is a client requesting a lease?", False)
+        return (f"● rogue DHCP — discover {d} · offered {o} · request {r} · leased {le}", le > 0)
+
     # ---- ARP ----------------------------------------------------------------
     def _arp_box(self) -> QGroupBox:
         box = QGroupBox("ARP man-in-the-middle — discover a segment, pick victims, MITM")

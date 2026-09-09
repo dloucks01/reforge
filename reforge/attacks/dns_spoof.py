@@ -72,18 +72,26 @@ class DnsSpoofer:  # pragma: no cover (needs root + live traffic)
         self.iface = iface
         self.hostmap = hostmap
         self._sniffer = None
-        self.answered = 0
+        self.seen = 0        # DNS queries observed (are we even on-path?)
+        self.answered = 0    # queries we forged a reply for (did our map match?)
 
     def _on(self, pkt):
+        from scapy.layers.dns import DNS
         from scapy.sendrecv import send
 
         try:
+            if pkt.haslayer(DNS) and int(pkt[DNS].qr) == 0:
+                self.seen += 1
             resp = spoof_response(pkt, self.hostmap)
         except Exception:            # a hostile query must never kill the loop
             return
         if resp is not None:
             send(resp, iface=self.iface, verbose=False)
             self.answered += 1
+
+    def status(self) -> dict:
+        return {"running": self._sniffer is not None, "seen": self.seen,
+                "answered": self.answered, "mappings": len(self.hostmap)}
 
     def start(self) -> None:
         from scapy.sendrecv import AsyncSniffer

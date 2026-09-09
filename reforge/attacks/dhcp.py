@@ -118,7 +118,10 @@ class RogueDhcp:  # pragma: no cover (needs root)
         self._next = pool_start
         self._leases: dict[str, str] = {}   # mac -> offered ip (stable across DORA)
         self._sniffer = None
-        self.leased = 0
+        self.discovers = 0   # DISCOVERs seen (clients looking for a server)
+        self.offered = 0     # OFFERs we sent
+        self.requests = 0    # REQUESTs seen (clients accepting)
+        self.leased = 0      # ACKs we sent (leases completed)
 
     def _lease_for(self, mac: str) -> str:
         """The IP this client is offered/acked — one per MAC, so the OFFER and the
@@ -142,12 +145,20 @@ class RogueDhcp:  # pragma: no cover (needs root)
         mac, xid, mtype = parsed
         ip = self._lease_for(mac)
         if mtype == "discover":
+            self.discovers += 1
             sendp(build_offer(mac, xid, ip, self.server_ip, gateway=self.gateway, dns=self.dns),
                   iface=self.iface, verbose=False)
+            self.offered += 1
         elif mtype == "request":
+            self.requests += 1
             sendp(build_ack(mac, xid, ip, self.server_ip, gateway=self.gateway, dns=self.dns),
                   iface=self.iface, verbose=False)
             self.leased += 1
+
+    def status(self) -> dict:
+        return {"running": self._sniffer is not None, "discovers": self.discovers,
+                "offered": self.offered, "requests": self.requests, "leased": self.leased,
+                "leases": dict(self._leases)}
 
     def start(self):
         from scapy.sendrecv import AsyncSniffer
