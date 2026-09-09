@@ -311,7 +311,16 @@ suite grew from 609 to 649 passing.
   scenario harvest step). Stream-reassembled NTLM correlation is a possible
   follow-up; single-segment auth is covered today.
 
+**Fast-path data plane — pure-Python tier done**
+
+- Multi-core AF_PACKET via PACKET_FANOUT (reforge/capture/fanout.py): N ring
+  sockets in one fanout group, one drain thread each, kernel-load-balanced —
+  RX scales with cores, no compiled component. Registered in the ladder between
+  raw_afpacket and the kernel-bypass tier and picked by recommend_backend up to
+  ~10G. AF_XDP/PF_RING/DPDK zero-copy remain honestly detection-only (compiled
+  per-deployment component).
+
 **Still open** (larger, separate efforts)
 
-- §2.8 built-in custom dissectors, §4 real fast-path data plane. (Wireless
-  (802.11) is on indefinite hold — see CAPABILITY-GAPS item 10.)
+- §2.8 built-in custom dissectors; the AF_XDP/PF_RING/DPDK compiled zero-copy
+  loop. (Wireless (802.11) is on indefinite hold — CAPABILITY-GAPS item 10.)

@@ -65,8 +65,12 @@ This is a strong **inline manipulation core**. The gaps below are mostly
     capture + injection (separate adapter/domain). **ON INDEFINITE HOLD** — not
     planned for now (a separate RF domain + hardware); revisit only if an
     engagement requires it.
-11. **Real high-rate data plane** — PARTIAL (reforge/capture/rawsocket.py): raw AF_PACKET (bytes-level, no Scapy on the hot path) delivered; AF_XDP/PF_RING/DPDK fast-path (today we
-    detect capability; the zero-copy loop is a compiled component).
+11. **Real high-rate data plane** — raw AF_PACKET + TPACKET_V3 mmap ring
+    (reforge/capture/rawsocket.py) and **multi-core AF_PACKET via PACKET_FANOUT**
+    (reforge/capture/fanout.py: N ring sockets, one drain thread each, kernel
+    load-balances — RX scales with cores, no compiled component) both DELIVERED
+    and runnable. The kernel-bypass tier (AF_XDP/PF_RING/DPDK zero-copy) is
+    detection-only: the zero-copy loop is a compiled per-deployment component.
 12. **Distributed / multi-sensor** — DELIVERED (reforge/distributed/): multiple sensors report to a central collector.
 13. **Covert channels / C2 testing** — DELIVERED (reforge/covert/): build & detect tunneled/exfil channels.
 
@@ -121,5 +125,6 @@ strategies, rate, live campaign, save results). Offline-tested end to end.
 2. **Credential harvester** + **active MITM modules** (ARP/DNS/DHCP/LLMNR).
 3. **HTTP attack toolkit** (sslstrip/injection/file-replace).
 4. **TLS interception**, then recon/fingerprinting and evasion.
-5. Real fast-path, distributed — as the engagement profile demands. (Wireless is
-   on indefinite hold — see item 10.)
+5. Kernel-bypass fast-path (AF_XDP/PF_RING/DPDK compiled component), distributed
+   — as the engagement profile demands. (Multi-core AF_PACKET fanout is already
+   delivered; wireless is on indefinite hold — see item 10.)

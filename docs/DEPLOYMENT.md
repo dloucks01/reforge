@@ -60,6 +60,8 @@ across backends, so scaling up never changes rules/GUI:
 | Backend    | Ceiling | Setup |
 |------------|---------|-------|
 | af_packet  | ~1-2 G  | none (default) |
+| raw_afpacket | 2-5 G | none (bytes-level + mmap ring) |
+| af_packet_fanout | 5-10 G | none (multi-core PACKET_FANOUT; scales with cores) |
 | af_xdp     | 10-40 G | XDP-capable driver + fast-path component |
 | pf_ring    | 10-100 G| PF_RING module + fast-path component |
 | dpdk       | 100 G   | hugepages + NIC bind + fast-path component |
@@ -68,9 +70,12 @@ For 10G+ links, apply the tuning steps Reforge lists (offloads off, IRQ/CPU
 affinity, NIC queues, and for DPDK hugepages + `isolcpus`). The Diagnostics tab
 and `reforge.perf.tuning` provide the exact commands.
 
-> The high-rate data planes (AF_XDP/PF_RING/DPDK zero-copy rings) require a
-> compiled fast-path component delivered per deployment; without it Reforge runs
-> on AF_PACKET and tells you what's missing. See PLAN.md sections 3 and 12.
+> Up to ~10G, `af_packet_fanout` needs no special build — it opens one ring
+> socket per worker in a PACKET_FANOUT group and the kernel spreads frames across
+> them, so capture scales with CPU cores. Beyond that, the kernel-bypass data
+> planes (AF_XDP/PF_RING/DPDK zero-copy rings) require a compiled fast-path
+> component delivered per deployment; without it Reforge runs on AF_PACKET and
+> tells you what's missing. See PLAN.md sections 3 and 12.
 
 ## 6. Troubleshooting
 
