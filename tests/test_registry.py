@@ -18,7 +18,7 @@ def test_recommend_steps_up_when_link_exceeds_afpacket():
 
 def test_recommend_returns_a_known_backend_for_huge_rate():
     # 200G exceeds every available ceiling -> fastest available fallback
-    assert R.recommend_backend(200000) in {"af_packet", "raw_afpacket",
+    assert R.recommend_backend(200000) in {"af_packet", "raw_afpacket", "af_packet_fanout",
                                            "af_xdp", "pf_ring", "dpdk"}
 
 

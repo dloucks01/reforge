@@ -10,17 +10,19 @@ import logging
 
 from reforge.capture.afpacket import AfPacketBackend
 from reforge.capture.base import CaptureBackend
+from reforge.capture.fanout import FanoutRingBackend
 from reforge.capture.pcap import PcapFileBackend
 from reforge.capture.perf_backends import AfXdpBackend, DpdkBackend, PfRingBackend
 from reforge.capture.rawsocket import RawSocketBackend
 
 # Ordered from most-compatible to fastest. AF_PACKET (live), raw AF_PACKET
-# (bytes-level), and pcap (offline) have full data planes; the kernel-bypass
-# backends detect host capability and need the fast-path component to actually
-# run (see docs/DEPLOYMENT.md).
+# (bytes-level), AF_PACKET fanout (multi-core), and pcap (offline) have full data
+# planes that actually run; the kernel-bypass backends detect host capability and
+# need the fast-path component to run (see docs/DEPLOYMENT.md).
 _REGISTRY: list[type[CaptureBackend]] = [
     AfPacketBackend,
     RawSocketBackend,
+    FanoutRingBackend,
     PcapFileBackend,
     AfXdpBackend,
     PfRingBackend,
@@ -32,7 +34,7 @@ _PLANNED = [
 ]
 
 # Rough speed ceilings (Mbps) per backend, for recommend_backend().
-_SPEED_CEILING = {"af_packet": 2000, "raw_afpacket": 5000,
+_SPEED_CEILING = {"af_packet": 2000, "raw_afpacket": 5000, "af_packet_fanout": 10000,
                   "af_xdp": 40000, "pf_ring": 100000, "dpdk": 100000}
 
 
@@ -57,7 +59,7 @@ def recommend_backend(link_mbps: int) -> str:
     this build can actually run them. Never returns a detected-but-unbuilt
     fast-path backend (see recommend_with_note for surfacing that case).
     """
-    order = ["af_packet", "raw_afpacket", "af_xdp", "pf_ring", "dpdk"]
+    order = ["af_packet", "raw_afpacket", "af_packet_fanout", "af_xdp", "pf_ring", "dpdk"]
     available = {name for name, ok, _ in list_backends() if ok and _runnable(name)}
     for name in order:
         if _SPEED_CEILING.get(name, 0) >= link_mbps and name in available:
