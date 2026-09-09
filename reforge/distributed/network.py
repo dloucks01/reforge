@@ -43,7 +43,7 @@ class CollectorServer:
         while self._running.is_set():
             try:
                 conn, _ = self._srv.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 break
@@ -65,7 +65,7 @@ class CollectorServer:
             while self._running.is_set():
                 try:
                     chunk = conn.recv(4096)
-                except socket.timeout:
+                except TimeoutError:
                     continue
                 except OSError:
                     break

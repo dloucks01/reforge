@@ -49,7 +49,7 @@ def test_proxy_injects_into_large_multisegment_body():
         while True:
             try:
                 chunk = c.recv(65536)
-            except socket.timeout:
+            except TimeoutError:
                 break
             if not chunk:
                 break

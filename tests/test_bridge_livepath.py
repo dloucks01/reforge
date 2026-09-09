@@ -32,7 +32,7 @@ class _CollectPort:
 
     def recv(self):
         self._ev.wait(0.05)
-        return None
+        return
 
     def send(self, data):
         self.sent.append(data)

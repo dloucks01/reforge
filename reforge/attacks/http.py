@@ -68,17 +68,18 @@ class HttpMessage:
 
 
 def parse_http(data: bytes) -> HttpMessage | None:
-    if b"\r\n\r\n" not in data:
-        # headers-only messages are rare; require a full header block
-        if not data.startswith(tuple(m.encode() for m in _METHODS)) and not data.startswith(b"HTTP/"):
-            return None
+    # headers-only messages are rare; require a full header block
+    if (b"\r\n\r\n" not in data
+            and not data.startswith(tuple(m.encode() for m in _METHODS))
+            and not data.startswith(b"HTTP/")):
+        return None
     head, _, body = data.partition(b"\r\n\r\n")
     lines = head.split(b"\r\n")
     if not lines:
         return None
     start = lines[0].decode("latin-1", "replace")
     is_response = start.startswith("HTTP/")
-    if not is_response and not start.split(" ", 1)[0] in _METHODS:
+    if not is_response and start.split(" ", 1)[0] not in _METHODS:
         return None
 
     headers: list[tuple[str, str]] = []

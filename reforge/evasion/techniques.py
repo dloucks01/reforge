@@ -103,7 +103,7 @@ def _resegment(ip, seq, chunk: bytes):
 
 
 def tcp_segments(pkt, seg: int = 1, reverse: bool = False) -> list[bytes]:
-    from scapy.layers.inet import IP, TCP
+    from scapy.layers.inet import TCP
 
     eth, ip = _split_eth(pkt)
     if ip is None or not ip.haslayer(TCP):

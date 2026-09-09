@@ -108,6 +108,7 @@ def test_drain_throttles_heavy_refreshes(app, monkeypatch):
 # ---- layout pass: attack scroll, intercept collapse, live split, status -----
 def test_attacks_panel_sections_in_scrollarea(app):
     from PySide6.QtWidgets import QScrollArea
+
     from reforge.gui.attacks_panel import AttacksPanel
     p = AttacksPanel()
     # the seven sections live inside a resizable scroll area (no more clipping)

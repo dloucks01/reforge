@@ -6,7 +6,7 @@ real prober uses Scapy srp/sr1.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 
 def build_arp_request(ip: str):

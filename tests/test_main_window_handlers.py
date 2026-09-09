@@ -206,8 +206,8 @@ def test_loss_suffix_variants(app):
 
 
 def test_inline_preflight_warning_surfaces_blockers(app, monkeypatch):
-    from reforge.diagnostics.doctor import Check
     import reforge.diagnostics.doctor as D
+    from reforge.diagnostics.doctor import Check
     win = _win(app)
     # no blockers -> empty warning
     monkeypatch.setattr(D, "inline_blockers", lambda ifaces=None: [])
@@ -305,7 +305,6 @@ def test_message_proxy_warning_routes_http_intent(app):
 
 
 def test_inline_warnings_combines_preflight_and_proxy(app, monkeypatch):
-    import reforge.gui.main_window as MW
     win = _win(app)
     monkeypatch.setattr(win, "_inline_preflight_warning", lambda ifaces=None: "PRE")
     monkeypatch.setattr(win, "_message_proxy_warning", lambda: "PROXY")

@@ -31,7 +31,7 @@ def test_spec_to_bytes_and_back():
     assert bytes(pkt[Raw].load) == b"\xde\xad\xbe\xef"
 
     back = B.bytes_to_spec(data)
-    assert [l["layer"] for l in back["layers"]][:3] == ["Ether", "IP", "TCP"]
+    assert [ly["layer"] for ly in back["layers"]][:3] == ["Ether", "IP", "TCP"]
 
 
 def test_empty_spec_yields_ether():

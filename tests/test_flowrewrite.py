@@ -104,8 +104,7 @@ def test_flowrewrite_handles_ipv6_flows():
     from scapy.layers.inet6 import IPv6
 
     def s6(seq, load=b""):
-        p = IPv6(src="fd00::2", dst="fd00::1") / TCP(sport=80, dport=5000, seq=seq) / load
-        return p
+        return IPv6(src="fd00::2", dst="fd00::1") / TCP(sport=80, dport=5000, seq=seq) / load
     def a6(ack):
         return IPv6(src="fd00::1", dst="fd00::2") / TCP(sport=5000, dport=80, ack=ack)
 

@@ -65,7 +65,7 @@ def _dissect(data: bytes):
     if l4 is not None:
         proto = l4.__class__.__name__
         return proto, str(ip.src), int(l4.sport), str(ip.dst), int(l4.dport), l4
-    proto = ip.getlayer("ICMP") and "ICMP" or ip.__class__.__name__
+    proto = (ip.getlayer("ICMP") and "ICMP") or ip.__class__.__name__
     return (proto if isinstance(proto, str) else "IP"), str(ip.src), 0, str(ip.dst), 0, None
 
 

@@ -11,7 +11,7 @@ fake predicate; `still_anomalous` wires a live target + monitor into a predicate
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from reforge.fuzzing import monitor as mon
 

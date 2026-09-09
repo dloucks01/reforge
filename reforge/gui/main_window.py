@@ -475,13 +475,13 @@ class MainWindow(QMainWindow):
 
     # split presets for the Live workspace: stream-heavy when just capturing,
     # editor-heavy once interception is armed
-    _LIVE_SPLIT_IDLE = [600, 260]
-    _LIVE_SPLIT_ARMED = [340, 520]
+    _LIVE_SPLIT_IDLE = (600, 260)
+    _LIVE_SPLIT_ARMED = (340, 520)
 
     def _set_live_split(self, armed: bool) -> None:
         outer = getattr(self, "_live_outer", None)
         if outer is not None:
-            outer.setSizes(self._LIVE_SPLIT_ARMED if armed else self._LIVE_SPLIT_IDLE)
+            outer.setSizes(list(self._LIVE_SPLIT_ARMED if armed else self._LIVE_SPLIT_IDLE))
 
     def _refresh_flows(self) -> None:
         if not hasattr(self, "flows_table"):

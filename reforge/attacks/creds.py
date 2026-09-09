@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import base64
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from urllib.parse import parse_qs, unquote_plus
 
 _FORM_USER = ("user", "username", "login", "email", "userid", "user_name", "usr")
@@ -159,7 +159,7 @@ class CredentialExtractor:
         return out
 
     def extract_text(self, text: str, src: str, dst: str, dport: int,
-                     flow_key: tuple) -> list["Credential"]:
+                     flow_key: tuple) -> list[Credential]:
         """Extract from reassembled application bytes (not a single packet)."""
         flow = self._flows.setdefault(flow_key, {})
         return self._http(text, src, dst) + self._line_protocols(text, flow, src, dst, dport)
@@ -370,7 +370,7 @@ class CredentialExtractor:
         return []
 
 
-def _ntlm_type3(blob: bytes, challenge: bytes | None, src: str, dst: str) -> "Credential | None":
+def _ntlm_type3(blob: bytes, challenge: bytes | None, src: str, dst: str) -> Credential | None:
     """Parse an NTLMSSP Type 3 message into a hashcat NetNTLM hash."""
     try:
         def sb(off: int) -> bytes:                  # security buffer at offset
@@ -397,7 +397,7 @@ def _ntlm_type3(blob: bytes, challenge: bytes | None, src: str, dst: str) -> "Cr
         return None
 
 
-def _parse_as_req(data: bytes, src: str, dst: str) -> "Credential | None":
+def _parse_as_req(data: bytes, src: str, dst: str) -> Credential | None:
     """Extract a crackable PA-ENC-TIMESTAMP from a Kerberos AS-REQ, if present."""
     try:
         tag, body, _ = _der_tlv(data, 0)            # AS-REQ [APPLICATION 10] = 0x6A

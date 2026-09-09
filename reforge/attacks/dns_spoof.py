@@ -72,11 +72,10 @@ def spoof_response(query_pkt, hostmap: dict[str, str], ttl: int = 300):
 
     ipl = query_pkt[IP]
     udpl = query_pkt[UDP]
-    resp = (IP(src=ipl.dst, dst=ipl.src)
+    return (IP(src=ipl.dst, dst=ipl.src)
             / UDP(sport=udpl.dport, dport=udpl.sport)
             / DNS(id=dns.id, qr=1, aa=1, qd=dns.qd,
                   an=DNSRR(rrname=qd0.qname, type=rr_type, ttl=ttl, rdata=ip)))
-    return resp
 
 
 def _first(field):

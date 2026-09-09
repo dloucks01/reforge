@@ -21,11 +21,11 @@ def warmup() -> None:
     if _DONE:
         return
     try:
-        import scapy.layers.dhcp  # noqa: F401
-        import scapy.layers.dns  # noqa: F401
-        import scapy.layers.inet  # noqa: F401
-        import scapy.layers.inet6  # noqa: F401
-        import scapy.layers.l2  # noqa: F401
+        import scapy.layers.dhcp
+        import scapy.layers.dns
+        import scapy.layers.inet
+        import scapy.layers.inet6
+        import scapy.layers.l2
         import scapy.layers.snmp  # noqa: F401
     except Exception:
         # A partial/broken Scapy import is exactly the failure warmup exists to

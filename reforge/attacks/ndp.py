@@ -19,17 +19,17 @@ log = logging.getLogger("reforge.ndp")
 
 
 def _rand_mac(rng: random.Random) -> str:
-    return "02:%02x:%02x:%02x:%02x:%02x" % tuple(rng.randrange(256) for _ in range(5))
+    return "02:" + ":".join(f"{rng.randrange(256):02x}" for _ in range(5))
 
 
 def _rand_prefix(rng: random.Random) -> str:
-    return "2001:db8:%x:%x::" % (rng.randrange(0x10000), rng.randrange(0x10000))
+    return f"2001:db8:{rng.randrange(0x10000):x}:{rng.randrange(0x10000):x}::"
 
 
 def build_flood_ra(rng: random.Random):
     """One RA for a flood: a fresh random router MAC, link-local, and prefix, so
     each advert makes the victim configure yet another address/route."""
-    return build_ra(_rand_mac(rng), src_ll="fe80::%x" % rng.randrange(1, 0xFFFF),
+    return build_ra(_rand_mac(rng), src_ll=f"fe80::{rng.randrange(1, 0xFFFF):x}",
                     prefix=_rand_prefix(rng))
 
 

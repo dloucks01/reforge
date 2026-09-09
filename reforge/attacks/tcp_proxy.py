@@ -18,7 +18,7 @@ import logging
 import socket
 import struct
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 from reforge.attacks import http
 
@@ -70,7 +70,7 @@ class TcpProxy:
         while self._running.is_set():
             try:
                 conn, _ = self._srv.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 break

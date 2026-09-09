@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import platform
 import shutil
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from reforge.capture import fastpath
 from reforge.capture.base import BackendCaps, CaptureBackend, Frame

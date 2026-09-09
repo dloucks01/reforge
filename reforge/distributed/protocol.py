@@ -17,6 +17,6 @@ class Message:
                 + "\n").encode()
 
     @classmethod
-    def decode(cls, line: bytes | str) -> "Message":
+    def decode(cls, line: bytes | str) -> Message:
         d = json.loads(line)
         return cls(d["sensor"], d["kind"], d.get("data", {}))

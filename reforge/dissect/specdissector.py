@@ -46,7 +46,7 @@ class SpecDissector(Dissector):
         self.name = spec["name"]
         self._fields = spec.get("fields", [])
         bind = spec.get("bind") or {}
-        self.ports = set(int(p) for p in bind.get("ports", []))
+        self.ports = {int(p) for p in bind.get("ports", [])}
         self.over = bind.get("over", "")
 
     def can_dissect(self, data: bytes, context: dict) -> bool:

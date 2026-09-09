@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import select
 import time
-from typing import Iterable
+from collections.abc import Iterable
 
 from reforge.capture.base import BackendCaps, CaptureBackend, Frame
 

@@ -10,7 +10,7 @@ Passive/inspection only — no re-injection. See docs/REASSEMBLY-PLAN.md.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 _MOD = 1 << 32
 _HALF = 1 << 31
@@ -67,9 +67,9 @@ class DirectionBuffer:
             return bytes(out)
 
         # future segment: buffer out of order (keep the longer on a dup seq)
-        if seq not in self.pending or len(data) > len(self.pending[seq]):
-            if len(self.pending) < self.max_pending:
-                self.pending[seq] = data
+        if ((seq not in self.pending or len(data) > len(self.pending[seq]))
+                and len(self.pending) < self.max_pending):
+            self.pending[seq] = data
         return b""
 
     def _drain(self) -> bytes:

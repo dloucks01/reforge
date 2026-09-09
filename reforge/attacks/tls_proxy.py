@@ -16,7 +16,7 @@ import select
 import socket
 import ssl
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 from reforge.attacks.tls_ca import DynamicCA
 from reforge.attacks.tls_sni import extract_sni
@@ -64,7 +64,7 @@ class TlsInterceptor:
         while self._running.is_set():
             try:
                 conn, _ = self._srv.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 break

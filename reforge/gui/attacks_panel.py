@@ -43,7 +43,7 @@ def _safe_stop(fn, what: str, on_event=None) -> str:
     try:
         fn()
         return ""
-    except Exception as exc:                 # noqa: BLE001 - report, don't crash the UI
+    except Exception as exc:
         log.warning("%s teardown failed", what, exc_info=True)
         if on_event is not None:
             try:
@@ -780,9 +780,11 @@ class AttacksPanel(QWidget):
         target = self.tp_target.text().strip()
         if target:
             host, _, port = target.partition(":")
-            resolver = (lambda c, h=host, p=int(port or 80): (h, p))
+            def resolver(c, h=host, p=int(port or 80)):
+                return (h, p)
         else:
-            resolver = (lambda c: tcp_proxy.so_original_dst(c) or ("127.0.0.1", 80))
+            def resolver(c):
+                return tcp_proxy.so_original_dst(c) or ("127.0.0.1", 80)
 
         transforms = self._build_http_transforms()
         interceptor = self._build_interceptor()

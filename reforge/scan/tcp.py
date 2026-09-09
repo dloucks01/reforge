@@ -8,7 +8,7 @@ without root or a network. The connect scanner uses ordinary sockets.
 from __future__ import annotations
 
 import socket
-from typing import Callable
+from collections.abc import Callable
 
 OPEN, CLOSED, FILTERED = "open", "closed", "filtered"
 
@@ -59,7 +59,7 @@ class ConnectScanner:
         s.settimeout(self.timeout)
         try:
             rc = s.connect_ex((host, port))
-        except socket.timeout:
+        except TimeoutError:
             return FILTERED
         except OSError:
             return FILTERED

@@ -6,7 +6,6 @@ import ipaddress
 
 from scapy.layers.dns import DNS, DNSQR
 from scapy.layers.inet import IP, UDP
-from scapy.layers.l2 import Ether
 
 from reforge.attacks import dns_spoof, namepoison
 

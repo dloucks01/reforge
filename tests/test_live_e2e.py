@@ -66,7 +66,7 @@ class _Harvester:
                     try:
                         self.creds += self.ce.extract(Ether(f.data))
                         self.creds += self.sh.add_frame(f.data)
-                    except Exception:  # noqa: BLE001, S110 - best-effort harvest
+                    except Exception:
                         pass
 
         self._t = threading.Thread(target=loop, daemon=True)

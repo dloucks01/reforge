@@ -36,4 +36,4 @@ def test_list_backends_includes_planned_nfqueue():
 
 def test_list_interfaces_returns_list():
     ifs = R.list_interfaces()
-    assert isinstance(ifs, list) and "lo" not in ifs or ifs == ["lo"]
+    assert (isinstance(ifs, list) and "lo" not in ifs) or ifs == ["lo"]

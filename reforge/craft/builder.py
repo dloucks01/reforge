@@ -123,7 +123,7 @@ def spec_to_bytes(spec: dict) -> bytes:
 
 
 def _jsonify(val: Any) -> Any:
-    if isinstance(val, bool) or isinstance(val, int) or isinstance(val, str):
+    if isinstance(val, (bool, int, str)):
         return val
     if isinstance(val, bytes):
         return "0x" + val.hex()
@@ -161,8 +161,5 @@ def bytes_to_spec(data: bytes, link: str = "ether") -> dict:
     from scapy.layers.inet6 import IPv6
     from scapy.layers.l2 import Ether
 
-    if link == "ip":
-        base = IPv6 if (data and (data[0] >> 4) == 6) else IP
-    else:
-        base = Ether
+    base = (IPv6 if (data and (data[0] >> 4) == 6) else IP) if link == "ip" else Ether
     return packet_to_spec(base(data))

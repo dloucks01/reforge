@@ -21,6 +21,11 @@ import ssl
 import tempfile
 from pathlib import Path
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
+
 _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
 
 
@@ -31,11 +36,6 @@ def _safe_name(host: str) -> str:
     cleaned = _UNSAFE_NAME.sub("_", host)[:64].lstrip(".") or "host"
     digest = hashlib.sha256(host.encode("utf-8", "replace")).hexdigest()[:8]
     return f"{cleaned}-{digest}"
-
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
 
 _ONE_DAY = datetime.timedelta(days=1)
 
@@ -48,7 +48,7 @@ def _name(cn: str) -> x509.Name:
 class DynamicCA:
     def __init__(self, cn: str = "Reforge Root CA", key_size: int = 2048):
         self.ca_key = rsa.generate_private_key(public_exponent=65537, key_size=key_size)
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         self.ca_cert = (
             x509.CertificateBuilder()
             .subject_name(_name(cn)).issuer_name(_name(cn))
@@ -89,7 +89,7 @@ class DynamicCA:
         if host in self._cert_cache:
             return self._cert_cache[host]
         key = rsa.generate_private_key(public_exponent=65537, key_size=self._key_size)
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         cert = (
             x509.CertificateBuilder()
             .subject_name(_name(host)).issuer_name(self.ca_cert.subject)

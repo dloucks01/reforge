@@ -52,7 +52,7 @@ def test_ftp_user_pass_paired_across_packets():
 
 def test_smtp_auth_login_base64():
     ex = CredentialExtractor()
-    flow = dict(sport=6000, dport=25)
+    flow = {"sport": 6000, "dport": 25}
     def seg(data):
         return Ether() / IP(src="10.0.0.5", dst="10.0.0.9") / TCP(**flow) / data
     ex.extract(seg(b"AUTH LOGIN\r\n"))
@@ -106,10 +106,11 @@ def test_llmnr_poison_response():
 
 # ---- "what landed" activity counters --------------------------------------
 def test_dns_spoofer_seen_and_answered_counters():
+    import scapy.sendrecv as SR
     from scapy.layers.dns import DNS, DNSQR
     from scapy.layers.inet import IP, UDP
     from scapy.layers.l2 import Ether
-    import scapy.sendrecv as SR
+
     from reforge.attacks.dns_spoof import DnsSpoofer
 
     sp = DnsSpoofer("lo", {"*.corp.local": "10.0.0.66"})
@@ -128,10 +129,11 @@ def test_dns_spoofer_seen_and_answered_counters():
 
 
 def test_namepoisoner_seen_and_poisoned_counters():
+    import scapy.sendrecv as SR
     from scapy.layers.dns import DNS, DNSQR
     from scapy.layers.inet import IP, UDP
     from scapy.layers.l2 import Ether
-    import scapy.sendrecv as SR
+
     from reforge.attacks.namepoison import NamePoisoner
 
     np = NamePoisoner("lo", "10.0.0.66")
@@ -147,9 +149,10 @@ def test_namepoisoner_seen_and_poisoned_counters():
 
 
 def test_rogue_dhcp_activity_counters():
+    import scapy.sendrecv as SR
     from scapy.layers.dhcp import DHCP
     from scapy.layers.l2 import Ether
-    import scapy.sendrecv as SR
+
     from reforge.attacks import dhcp as D
 
     rogue = D.RogueDhcp("lo", "10.0.0.1", pool_base="10.0.0.", pool_start=200)

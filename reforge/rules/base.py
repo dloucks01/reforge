@@ -26,7 +26,7 @@ class Disposition(enum.Enum):
 class Verdict:
     disposition: Disposition = Disposition.FORWARD
     delay_s: float = 0.0                       # latency injection
-    extra_sends: list["Packet"] = field(default_factory=list)  # injected/duplicated
+    extra_sends: list[Packet] = field(default_factory=list)  # injected/duplicated
     matched_rule: str | None = None
     notes: list[str] = field(default_factory=list)
 
@@ -35,7 +35,7 @@ class Match(abc.ABC):
     """Decides whether a packet is in scope for a rule."""
 
     @abc.abstractmethod
-    def matches(self, pkt: "Packet") -> bool: ...
+    def matches(self, pkt: Packet) -> bool: ...
 
 
 class Action(abc.ABC):
@@ -45,7 +45,7 @@ class Action(abc.ABC):
     """
 
     @abc.abstractmethod
-    def apply(self, pkt: "Packet", verdict: Verdict) -> None: ...
+    def apply(self, pkt: Packet, verdict: Verdict) -> None: ...
 
 
 @dataclass

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QFont
@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
 )
 
 from reforge.capture.registry import list_interfaces
-from reforge.dissect import scapy_tree
 from reforge.fuzzing import monitor as mon
 from reforge.fuzzing import strategies as St
 from reforge.fuzzing.campaign import FuzzCampaign
