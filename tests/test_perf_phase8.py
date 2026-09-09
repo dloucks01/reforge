@@ -46,4 +46,4 @@ def test_perf_backend_open_raises_clear_message():
         be.open()
         assert False, "expected NotImplementedError"
     except NotImplementedError as exc:
-        assert "DEPLOYMENT" in str(exc)
+        assert "FAST-PATH" in str(exc)

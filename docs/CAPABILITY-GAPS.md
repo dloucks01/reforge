@@ -71,6 +71,9 @@ This is a strong **inline manipulation core**. The gaps below are mostly
     load-balances — RX scales with cores, no compiled component) both DELIVERED
     and runnable. The kernel-bypass tier (AF_XDP/PF_RING/DPDK zero-copy) is
     detection-only: the zero-copy loop is a compiled per-deployment component.
+    Reforge discovers + loads an installed component via the provider contract in
+    reforge/capture/fastpath.py; building/installing it is documented in
+    docs/FAST-PATH.md.
 12. **Distributed / multi-sensor** — DELIVERED (reforge/distributed/): multiple sensors report to a central collector.
 13. **Covert channels / C2 testing** — DELIVERED (reforge/covert/): build & detect tunneled/exfil channels.
 

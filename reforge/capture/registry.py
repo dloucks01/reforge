@@ -39,16 +39,20 @@ _SPEED_CEILING = {"af_packet": 2000, "raw_afpacket": 5000, "af_packet_fanout": 1
 
 
 def _runnable(name: str) -> bool:
-    """Available AND has a working data plane in this build (open() won't raise).
+    """Available AND has a working data plane here (open() won't raise).
 
     A perf backend can be *detected* (is_available True) while its zero-copy loop
     is a compiled component absent from this build; recommending it would hand the
-    caller a backend that throws at open(). Filter those out here.
+    caller a backend that throws at open(). Such a backend becomes runnable only
+    once its fast-path component is installed (see docs/FAST-PATH.md).
     """
     try:
-        return get_backend(name).caps.has_dataplane
+        if get_backend(name).caps.has_dataplane:
+            return True
     except KeyError:
         return False
+    from reforge.capture import fastpath
+    return fastpath.provider_available(name)
 
 
 def recommend_backend(link_mbps: int) -> str:
