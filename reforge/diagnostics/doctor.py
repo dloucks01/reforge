@@ -74,9 +74,16 @@ def _check_tools() -> Check:
 
 def _check_root() -> Check:
     is_root = os.geteuid() == 0
+    # Capture/inline packet I/O needs CAP_NET_RAW in this process; the privileged
+    # helper only takes over the network CONFIG (nft/ip/ethtool). So the accurate
+    # guidance is: run with CAP_NET_RAW (root is the simple way), and optionally
+    # start the helper to keep config changes out of an otherwise-unprivileged app.
     return Check("privileges", True,
-                 "running as root" if is_root else "unprivileged (use the helper)",
-                 "" if is_root else "start: sudo python -m reforge.privhelper.helper")
+                 "running as root" if is_root
+                 else "unprivileged; capture needs CAP_NET_RAW",
+                 "" if is_root else
+                 "run as root (or grant CAP_NET_RAW); optional config helper: "
+                 "sudo python -m reforge.privhelper.helper")
 
 
 def _check_backends() -> Check:

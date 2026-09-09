@@ -216,3 +216,50 @@ subsystems are well covered. Blind spots that let the above bugs through:
    hot/UI thread, lock the shared counters.
 
 Items 1 and 3 are underway in the same change set as this review.
+
+---
+
+## 6. Resolution log (this change set)
+
+Worked in priority order from §5. Each fix shipped with regression tests; the
+suite grew from 609 to 649 passing.
+
+**Done**
+
+- **§3.1 Frame.egress** — field added; afpacket/rawsocket send paths tested.
+- **§3.2 name-service poison source IP** — answers now source from our own IP.
+- **§3.9 DNS spoof qtype + key casing** — answers A vs AAAA by address family;
+  hostmap keys matched case-insensitively.
+- **§3.5 tls_proxy fd leak** — all sockets closed in a finally.
+- **§3.3 host-stack ARP suppression** — moved to a dedicated arp-family table
+  (inet never sees ARP); chains flushed so repeat calls don't stack rules.
+- **§3.4 revert accuracy** — an injectable HostState reader records the real
+  prior state; falls back to the old assumption only when state is unknown.
+- **§2.2 NFQUEUE inject/duplicate** — res.extra rides an injectable injector
+  (lazy L3 raw socket by default); an `injected` counter; failures count errors.
+- **§2.3 backend recommendation** — BackendCaps.has_dataplane keeps
+  recommend_backend on runnable backends; recommend_with_note flags a
+  detected-but-unbuilt fast-path.
+- **§3.7 delay vs. watchdog** — _sleep_delay refreshes the heartbeat in chunks;
+  headless returns at once.
+- **§3.6 cross-thread transmit** — all sends funnel through _emit() under an
+  RLock; _sent access is locked.
+- **§2.1 / helper ops** — the privileged helper now covers prepare_bridge,
+  suppress_host_stack, NFQUEUE install/remove, fail-open/closed, and revert, with
+  a tested HelperClient and a bounded request read. The doctor privilege message
+  is corrected. Note: true privilege separation is inherently partial — the
+  capture data plane needs CAP_NET_RAW in the app process and cannot be delegated
+  over IPC; the helper takes over the network config only.
+
+**Deferred to the GUI pass** (they touch the GUI being reworked)
+
+- **§3.8** blocking nft subprocess on the Qt UI thread (move to a worker).
+- **§3.12** per-tick UI work (drain/refresh/dry-run) under load.
+- Wiring the GUI's _start_inline/_stop_inline through HelperClient so the GUI can
+  run unprivileged when a helper is present.
+
+**Not yet addressed** (lower priority / larger)
+
+- §2.4 credential types (IMAP/LDAP/Telnet/NTLM/Kerberos/Digest), §2.6 RA flooding
+  + dead RogueRouter, §3.10 console plaintext bind, §3.11 swallowed stop errors,
+  §3.13 unbounded HTTP buffer, §3.16 SNI-derived filename, and the remaining LOWs.
