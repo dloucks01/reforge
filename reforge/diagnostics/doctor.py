@@ -10,8 +10,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from reforge.capture.registry import list_backends
 
@@ -43,6 +43,7 @@ def _check_scapy() -> Check:
 def _check_pyside() -> Check:
     try:
         import PySide6
+
         # The base package can be present without the compiled Qt modules;
         # the GUI needs QtWidgets/QtCore/QtGui specifically.
         from PySide6 import QtCore, QtGui, QtWidgets  # noqa: F401
@@ -86,6 +87,131 @@ def _check_backends() -> Check:
                  "" if avail else "no capture backend usable")
 
 
+# ---------------------------------------------------------------------------
+# Inline preflight: the host-level blockers that fail *silently* mid-attack —
+# a poisoned victim's traffic reaches the attacker but never gets relayed or
+# manipulated because the kernel drops it. Catch them before arming so "no
+# traffic" becomes an explained, fixable blocker instead of a dead attack.
+# ---------------------------------------------------------------------------
+def _read(path: str) -> str:
+    with open(path) as f:
+        return f.read()
+
+
+def _run_text(*args: str) -> str:
+    import subprocess
+    try:
+        return subprocess.run(list(args), capture_output=True, text=True,
+                              timeout=5, check=False).stdout
+    except Exception:
+        return ""
+
+
+def parse_forward_policy(iptables_forward_output: str) -> str | None:
+    """Extract the FORWARD chain default policy from `iptables -L FORWARD`."""
+    import re
+    m = re.search(r"Chain FORWARD \(policy (\w+)\)", iptables_forward_output)
+    return m.group(1) if m else None
+
+
+def interpret_rp_filter(all_val: str, default_val: str) -> tuple[bool, str]:
+    """(ok, note) for the effective reverse-path filter mode. Strict (1) can drop
+    same-segment MITM relay; 0 (off) and 2 (loose) are fine."""
+    vals = [all_val.strip(), default_val.strip()]
+    if "1" in vals:
+        return False, "strict — may drop same-segment MITM relay"
+    return True, "loose/off"
+
+
+def check_forward_policy() -> Check:
+    pol = parse_forward_policy(_run_text("iptables", "-L", "FORWARD", "-n"))
+    if pol is None:
+        return Check("forward-policy", True, "unknown (needs root/iptables to read)")
+    if pol == "DROP":
+        return Check("forward-policy", False,
+                     "FORWARD chain policy is DROP — relayed victim traffic is dropped "
+                     "(common with Docker/firewalld)",
+                     "iptables -I FORWARD -s <victim-subnet> -j ACCEPT  (or -P FORWARD ACCEPT)")
+    return Check("forward-policy", True, f"FORWARD policy {pol}")
+
+
+def check_rp_filter() -> Check:
+    try:
+        a = _read("/proc/sys/net/ipv4/conf/all/rp_filter")
+        d = _read("/proc/sys/net/ipv4/conf/default/rp_filter")
+    except Exception:
+        return Check("rp-filter", True, "unknown")
+    ok, note = interpret_rp_filter(a, d)
+    fix = "sysctl -w net.ipv4.conf.all.rp_filter=2" if not ok else ""
+    return Check("rp-filter", ok, f"rp_filter all/default = {a.strip()}/{d.strip()} ({note})", fix)
+
+
+def check_ip_forwarding() -> Check:
+    try:
+        on = _read("/proc/sys/net/ipv4/ip_forward").strip() == "1"
+    except Exception:
+        return Check("ip-forward", True, "unknown")
+    return Check("ip-forward", True,
+                 "IPv4 forwarding on" if on
+                 else "IPv4 forwarding off (a MITM enables it; needs root)")
+
+
+def check_nfqueue_ready() -> Check:
+    try:
+        import netfilterqueue  # noqa: F401
+        have_nfq = True
+    except Exception:
+        have_nfq = False
+    have_nft = bool(shutil.which("nft"))
+    if have_nfq and have_nft:
+        return Check("nfqueue-ready", True, "netfilterqueue + nft present (NFQUEUE inline ready)")
+    missing = ([] if have_nfq else ["python3-netfilterqueue"]) + ([] if have_nft else ["nftables"])
+    return Check("nfqueue-ready", False, "NFQUEUE inline path unavailable",
+                 "apt install " + ", ".join(missing))
+
+
+_RISKY_OFFLOADS = ("tx-checksumming", "rx-checksumming",
+                   "generic-segmentation-offload", "tcp-segmentation-offload")
+
+
+def parse_offloads_on(ethtool_k_output: str) -> list[str]:
+    """Offloads reported 'on' that corrupt re-injected bridge frames."""
+    return [f for f in _RISKY_OFFLOADS if f"{f}: on" in ethtool_k_output]
+
+
+def check_offloads(iface: str) -> Check:
+    out = _run_text("ethtool", "-k", iface)
+    if not out:
+        return Check(f"offloads/{iface}", True, "unknown")
+    risky = parse_offloads_on(out)
+    if risky:
+        return Check(f"offloads/{iface}", False,
+                     f"{iface}: offloads on ({', '.join(risky)}) — re-injected bridge frames "
+                     "carry bad checksums and get dropped",
+                     f"ethtool -K {iface} tx off rx off gso off tso off")
+    return Check(f"offloads/{iface}", True, f"{iface}: offloads off")
+
+
+# host-level checks common to any inline path (NFQUEUE or bridge)
+INLINE_CHECKS: list[Callable[[], Check]] = [
+    check_nfqueue_ready, check_forward_policy, check_rp_filter, check_ip_forwarding,
+]
+
+
+def run_inline_preflight(ifaces: list[str] | None = None) -> list[Check]:
+    """Readiness checks to run before arming inline manipulation. Pass the bridge
+    interfaces to also flag NIC offloads that break frame re-injection."""
+    checks = [c() for c in INLINE_CHECKS]
+    for i in ifaces or []:
+        checks.append(check_offloads(i))
+    return checks
+
+
+def inline_blockers(ifaces: list[str] | None = None) -> list[Check]:
+    """Just the preflight checks that will actually block inline traffic."""
+    return [c for c in run_inline_preflight(ifaces) if not c.ok]
+
+
 CHECKS: list[Callable[[], Check]] = [
     _check_python,
     _check_scapy,
@@ -94,6 +220,7 @@ CHECKS: list[Callable[[], Check]] = [
     _check_tools,
     _check_backends,
     _check_root,
+    *INLINE_CHECKS,
 ]
 
 

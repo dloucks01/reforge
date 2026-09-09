@@ -203,3 +203,32 @@ def test_loss_suffix_variants(app):
         "total_dropped": 9, "loss_pct": 1.2, "kernel_dropped": 0}})()
     assert "UI backpressure" in win._loss_suffix()
     win.service = None
+
+
+def test_inline_preflight_warning_surfaces_blockers(app, monkeypatch):
+    from reforge.diagnostics.doctor import Check
+    import reforge.diagnostics.doctor as D
+    win = _win(app)
+    # no blockers -> empty warning
+    monkeypatch.setattr(D, "inline_blockers", lambda ifaces=None: [])
+    assert win._inline_preflight_warning() == ""
+    # a blocker -> warning names it + fix, and it's logged to the engagement
+    monkeypatch.setattr(D, "inline_blockers", lambda ifaces=None: [
+        Check("forward-policy", False, "FORWARD policy is DROP", "iptables -P FORWARD ACCEPT")])
+    warn = win._inline_preflight_warning()
+    assert "forward-policy" in warn and "iptables -P FORWARD ACCEPT" in warn
+    assert any(e.kind == "preflight" for e in win.engagement.events)
+
+
+def test_inline_preflight_passes_ifaces_for_offloads(app, monkeypatch):
+    import reforge.diagnostics.doctor as D
+    win = _win(app)
+    seen = {}
+
+    def fake(ifaces=None):
+        seen["ifaces"] = ifaces
+        return []
+
+    monkeypatch.setattr(D, "inline_blockers", fake)
+    win._inline_preflight_warning(["ethA", "ethB"])
+    assert seen["ifaces"] == ["ethA", "ethB"]

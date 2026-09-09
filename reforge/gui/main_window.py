@@ -590,8 +590,10 @@ class MainWindow(QMainWindow):
                                  flow_rewrite=self.act_seqfix.isChecked(),
                                  checksum_fixup=self.act_csum.isChecked())
         state = "ARMED" if armed else "pass-through (safe)"
+        warn = self._inline_preflight_warning([a, b])   # includes NIC offloads on a/b
         self.engagement.log("bridge", a + " <-> " + b + " [" + state + "]")
-        self._start_service(bridge, f"bridge {a} <-> {b}  [{state}]", reset=False)
+        label = f"bridge {a} <-> {b}  [{state}]"
+        self._start_service(bridge, f"{warn}   {label}" if warn else label, reset=False)
 
     def open_pcap(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -710,6 +712,21 @@ class MainWindow(QMainWindow):
         self.intercept_panel.set_transform_count(0)
         self.statusBar().showMessage("Cleared all interactive transforms.")
 
+    def _inline_preflight_warning(self, ifaces: list | None = None) -> str:
+        """Run the inline preflight; return a one-line warning naming any host-level
+        blocker (FORWARD DROP, strict rp_filter, missing NFQUEUE, NIC offloads) that
+        would silently swallow relayed traffic, or '' when clear."""
+        try:
+            from reforge.diagnostics.doctor import inline_blockers
+            blockers = inline_blockers(ifaces)
+        except Exception:
+            return ""
+        if not blockers:
+            return ""
+        parts = "; ".join(f"{b.name} — {b.fix}" for b in blockers)
+        self.engagement.log("preflight", "inline blockers: " + parts)
+        return "⚠ inline preflight: " + parts
+
     def _start_inline(self, iface: str, victims: list) -> str:
         """Divert a MITM'd victim's forwarded traffic into the rule engine +
         interactive intercept via NFQUEUE. Returns a status string."""
@@ -718,6 +735,7 @@ class MainWindow(QMainWindow):
 
         from reforge.capture.nfqueue import NfqueueRunner, nft_forward_queue_rules
 
+        warn = self._inline_preflight_warning()      # NFQUEUE relays via the kernel
         self._stop_inline()
         engine = self.rules_panel.build_engine(dry_run=False)
         self.engine = engine
@@ -732,9 +750,10 @@ class MainWindow(QMainWindow):
         self._nfq_thread = threading.Thread(target=self._nfq_runner.run, daemon=True)
         self._nfq_thread.start()
         self.engagement.log("mitm-inline", "NFQUEUE victims: " + ", ".join(victims or []))
-        self.statusBar().showMessage("Inline manipulation ON — victim traffic flows through "
-                                     "the Intercept tab. Set a filter to hold, or add rules.")
-        return "inline via NFQUEUE"
+        base = ("Inline manipulation ON — victim traffic flows through the Intercept tab. "
+                "Set a filter to hold, or add rules.")
+        self.statusBar().showMessage(f"{warn}   {base}" if warn else base)
+        return "inline via NFQUEUE" + (f"  [{warn}]" if warn else "")
 
     def _stop_inline(self) -> None:
         import subprocess

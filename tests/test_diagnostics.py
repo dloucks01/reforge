@@ -56,3 +56,45 @@ def test_snapshot_from_bridge_like_with_meter():
 def test_system_stats():
     s = system_stats()
     assert "cpu_count" in s and "loadavg" in s
+
+
+# ---- inline preflight -----------------------------------------------------
+def test_parse_forward_policy():
+    assert doctor.parse_forward_policy("Chain FORWARD (policy DROP)\n...") == "DROP"
+    assert doctor.parse_forward_policy("Chain FORWARD (policy ACCEPT)\n") == "ACCEPT"
+    assert doctor.parse_forward_policy("no forward chain here") is None
+
+
+def test_interpret_rp_filter():
+    ok, note = doctor.interpret_rp_filter("1", "0")
+    assert ok is False and "strict" in note                 # any strict -> not ok
+    assert doctor.interpret_rp_filter("0", "0")[0] is True
+    assert doctor.interpret_rp_filter("2", "2")[0] is True   # loose is fine
+
+
+def test_parse_offloads_on():
+    out = ("tx-checksumming: on\nrx-checksumming: off\n"
+           "generic-segmentation-offload: on\ntcp-segmentation-offload: off\n")
+    on = doctor.parse_offloads_on(out)
+    assert "tx-checksumming" in on and "generic-segmentation-offload" in on
+    assert "rx-checksumming" not in on
+    assert doctor.parse_offloads_on("tx-checksumming: off\n") == []
+
+
+def test_run_inline_preflight_returns_named_checks():
+    names = {c.name for c in doctor.run_inline_preflight()}
+    assert {"nfqueue-ready", "forward-policy", "rp-filter", "ip-forward"} <= names
+    # with an interface, an offloads check is added
+    names2 = {c.name for c in doctor.run_inline_preflight(["lo"])}
+    assert any(n.startswith("offloads/") for n in names2)
+
+
+def test_inline_blockers_is_subset_of_failures():
+    blockers = doctor.inline_blockers()
+    assert all(b.ok is False for b in blockers)
+    assert all(hasattr(b, "fix") for b in blockers)
+
+
+def test_inline_checks_included_in_full_doctor():
+    names = {c.name for c in doctor.run_checks()}
+    assert {"forward-policy", "rp-filter", "nfqueue-ready"} <= names
