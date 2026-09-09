@@ -129,3 +129,19 @@ def test_rules_change_length_detector():
     assert rules_change_length([{"enabled": True, "actions": [{"type": "http_sslstrip"}]}])
     assert not rules_change_length([{"enabled": False, "actions": [{"type": "http_sslstrip"}]}])
     assert not rules_change_length([{"enabled": True, "actions": [{"type": "duplicate", "times": 2}]}])
+
+
+def test_rules_need_message_proxy_detector():
+    from reforge.rules.spec import proxy_transform_names, rules_need_message_proxy
+    specs = [
+        {"enabled": True, "actions": [{"type": "http_inject"}, {"type": "drop"}]},
+        {"enabled": True, "actions": [{"type": "http_sslstrip"}, {"type": "http_inject"}]},
+        {"enabled": False, "actions": [{"type": "http_replace_body"}]},   # disabled -> ignored
+        {"enabled": True, "actions": [{"type": "payload_replace", "find": "a", "replace": "b"}]},
+    ]
+    types = rules_need_message_proxy(specs)
+    assert types == ["http_inject", "http_sslstrip"]         # distinct, in order, enabled only
+    assert "http_replace_body" not in types
+    assert proxy_transform_names(["http_inject", "http_sslstrip"]) == ["inject HTML", "sslstrip"]
+    # a purely per-segment rule set needs no proxy
+    assert rules_need_message_proxy([{"enabled": True, "actions": [{"type": "drop"}]}]) == []

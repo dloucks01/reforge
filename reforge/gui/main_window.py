@@ -615,7 +615,7 @@ class MainWindow(QMainWindow):
                                  flow_rewrite=self._auto_arm_seqfix(),
                                  checksum_fixup=self.act_csum.isChecked())
         state = "ARMED" if armed else "pass-through (safe)"
-        warn = self._inline_preflight_warning([a, b])   # includes NIC offloads on a/b
+        warn = self._inline_warnings([a, b])   # preflight (incl. offloads) + message-proxy intent
         self.engagement.log("bridge", a + " <-> " + b + " [" + state + "]")
         label = f"bridge {a} <-> {b}  [{state}]"
         self._start_service(bridge, f"{warn}   {label}" if warn else label, reset=False)
@@ -776,6 +776,26 @@ class MainWindow(QMainWindow):
         self.engagement.log("preflight", "inline blockers: " + parts)
         return "⚠ inline preflight: " + parts
 
+    def _message_proxy_warning(self) -> str:
+        """Warn when the inline rule set carries whole-HTTP-message transforms the
+        per-segment engine can't fulfil on a multi-segment body, and point at the
+        reassembling relay (Attacks → TCP proxy) with the equivalent transforms."""
+        from reforge.rules.spec import proxy_transform_names, rules_need_message_proxy
+        types = rules_need_message_proxy(self.rules_panel.specs)
+        if not types:
+            return ""
+        names = ", ".join(proxy_transform_names(types))
+        self.engagement.log("proxy-intent", "message-level rules inline: " + ", ".join(types))
+        return ("⚠ rule(s) rewrite whole HTTP messages (" + names + ") — the inline "
+                "per-segment engine only sees one segment, so a multi-segment body is "
+                "missed. For reliable whole-body rewriting use Attacks → TCP proxy "
+                "(message relay) with the same transform(s).")
+
+    def _inline_warnings(self, ifaces: list | None = None) -> str:
+        """Combined pre-arm guidance: host preflight blockers + message-proxy intent."""
+        return "   ".join(w for w in (self._inline_preflight_warning(ifaces),
+                                       self._message_proxy_warning()) if w)
+
     def _start_inline(self, iface: str, victims: list) -> str:
         """Divert a MITM'd victim's forwarded traffic into the rule engine +
         interactive intercept via NFQUEUE. Returns a status string."""
@@ -784,7 +804,7 @@ class MainWindow(QMainWindow):
 
         from reforge.capture.nfqueue import NfqueueRunner, nft_forward_queue_rules
 
-        warn = self._inline_preflight_warning()      # NFQUEUE relays via the kernel
+        warn = self._inline_warnings()              # preflight + message-proxy intent
         self._stop_inline()
         engine = self.rules_panel.build_engine(dry_run=False)
         self.engine = engine

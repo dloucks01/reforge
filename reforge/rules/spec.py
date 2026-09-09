@@ -154,3 +154,38 @@ def rules_change_length(specs: list[dict]) -> bool:
     return any(action_changes_length(a)
                for r in specs if r.get("enabled", True)
                for a in r.get("actions", []))
+
+
+# --- message-level intent (route to the reassembling relay, not per-segment) --
+# http_* actions rewrite a whole HTTP message, but the inline engine (bridge /
+# NFQUEUE) sees one TCP segment at a time: parse_http() on a lone segment fails
+# when the message spans several segments, so a multi-segment body is missed or
+# rewritten from a fragment. That intent belongs on the TcpProxy message relay,
+# which reassembles complete messages before transforming.
+_PROXY_TRANSFORM = {
+    "http_sslstrip": "sslstrip",
+    "http_strip_encoding": "strip Accept-Encoding",
+    "http_inject": "inject HTML",
+    "http_replace_body": "replace body",
+    "http_strip_cookie": "strip Secure/HttpOnly cookie",
+    "http_remove_sec_headers": "remove security headers",
+}
+
+
+def rules_need_message_proxy(specs: list[dict]) -> list[str]:
+    """Distinct message-level action types in an enabled rule set — the whole-HTTP
+    transforms that the per-segment inline engine can't reliably apply."""
+    seen: list[str] = []
+    for r in specs:
+        if not r.get("enabled", True):
+            continue
+        for a in r.get("actions", []):
+            t = a.get("type", "")
+            if t.startswith("http_") and t not in seen:
+                seen.append(t)
+    return seen
+
+
+def proxy_transform_names(types: list[str]) -> list[str]:
+    """Human names of the equivalent TcpProxy relay transforms for the given types."""
+    return [_PROXY_TRANSFORM.get(t, t) for t in types]

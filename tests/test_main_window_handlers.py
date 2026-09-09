@@ -288,3 +288,27 @@ def test_engine_advice_reflects_mitm(app, monkeypatch):
                         lambda: D.Check("nfqueue-ready", True, "ok"))
     assert win._engine_advice(mitm_active=True).engine == "nfqueue"
     assert win._engine_advice(mitm_active=False).engine == "bridge"
+
+
+def test_message_proxy_warning_routes_http_intent(app):
+    win = _win(app)
+    # no http rules -> no warning
+    win.rules_panel.specs[:] = [{"enabled": True, "match": {"type": "all"},
+        "actions": [{"type": "drop"}]}]
+    assert win._message_proxy_warning() == ""
+    # a whole-message http transform -> warn + name the relay + equivalent transform
+    win.rules_panel.specs[:] = [{"enabled": True, "match": {"type": "all"},
+        "actions": [{"type": "http_inject", "snippet": "<script>"}]}]
+    warn = win._message_proxy_warning()
+    assert "TCP proxy" in warn and "inject HTML" in warn
+    assert any(e.kind == "proxy-intent" for e in win.engagement.events)
+
+
+def test_inline_warnings_combines_preflight_and_proxy(app, monkeypatch):
+    import reforge.gui.main_window as MW
+    win = _win(app)
+    monkeypatch.setattr(win, "_inline_preflight_warning", lambda ifaces=None: "PRE")
+    monkeypatch.setattr(win, "_message_proxy_warning", lambda: "PROXY")
+    assert win._inline_warnings() == "PRE   PROXY"
+    monkeypatch.setattr(win, "_message_proxy_warning", lambda: "")
+    assert win._inline_warnings() == "PRE"                    # empties dropped
