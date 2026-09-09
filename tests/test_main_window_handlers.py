@@ -261,3 +261,30 @@ def test_intercept_length_change_warns(app):
     msg = win.statusBar().currentMessage()
     assert "+7 bytes" in msg and "desync" in msg
     assert any(e.kind == "seqfix" for e in win.engagement.events)
+
+
+def test_mode_change_to_bridge_shows_engine_guidance(app, monkeypatch):
+    import reforge.gui.main_window as MW
+    win = _win(app)
+    # two NICs present -> Bridge is affirmed as the clean transparent tap
+    monkeypatch.setattr(MW, "list_interfaces", lambda: ["eth0", "eth1"])
+    win._on_mode_changed("Bridge")
+    assert "Bridge engine" in win.statusBar().currentMessage()
+    # only one NIC -> warn Bridge needs two and point at NFQUEUE + MITM
+    monkeypatch.setattr(MW, "list_interfaces", lambda: ["eth0"])
+    win._on_mode_changed("Bridge")
+    msg = win.statusBar().currentMessage()
+    assert "two interfaces" in msg and "MITM" in msg
+    assert win._usable_iface_count() == 1
+
+
+def test_engine_advice_reflects_mitm(app, monkeypatch):
+    import reforge.gui.main_window as MW
+    win = _win(app)
+    monkeypatch.setattr(MW, "list_interfaces", lambda: ["eth0", "eth1"])
+    # a running MITM flips the recommendation to NFQUEUE even with two NICs
+    import reforge.diagnostics.doctor as D
+    monkeypatch.setattr(D, "check_nfqueue_ready",
+                        lambda: D.Check("nfqueue-ready", True, "ok"))
+    assert win._engine_advice(mitm_active=True).engine == "nfqueue"
+    assert win._engine_advice(mitm_active=False).engine == "bridge"

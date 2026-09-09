@@ -108,3 +108,13 @@ def test_poll_activity_updates_status_from_a_runner(app):
     p._dns = FakeDns()
     p._poll_activity()                       # must not raise; updates the label
     assert "seen 7" in p.dns_status.text() and "answered 4" in p.dns_status.text()
+
+
+def test_engine_note_guides_nfqueue_choice():
+    from reforge.gui.attacks_panel import AttacksPanel
+    # nfqueue ready -> names the routed-hop trade-off and the bridge alternative
+    note = AttacksPanel._engine_note(iface_count=1, nfqueue_ok=True)
+    assert "NFQUEUE" in note and "L3 hop" in note and "Bridge" in note
+    # nfqueue stack missing -> a warning, not a green light
+    note = AttacksPanel._engine_note(iface_count=1, nfqueue_ok=False)
+    assert note.startswith("⚠")

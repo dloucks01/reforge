@@ -133,6 +133,23 @@ class AttacksPanel(QWidget):
             return ("⚠ no DHCP DISCOVERs seen — is a client requesting a lease?", False)
         return (f"● rogue DHCP — discover {d} · offered {o} · request {r} · leased {le}", le > 0)
 
+    @staticmethod
+    def _engine_note(iface_count: int, nfqueue_ok: bool) -> str:
+        """One-line engine guidance for the NFQUEUE intercept toggle."""
+        from reforge.diagnostics.doctor import recommend_inline_engine
+        if not nfqueue_ok:
+            adv = recommend_inline_engine(iface_count, nfqueue_ok, mitm_active=True)
+            return "⚠ " + adv.reason + " — " + adv.tradeoff
+        adv = recommend_inline_engine(iface_count, True, mitm_active=True)
+        return "NFQUEUE routed-hop engine — " + adv.tradeoff + "  " + adv.alternative
+
+    def _on_intercept_toggled(self, on: bool) -> None:
+        if not on:
+            return
+        from reforge.diagnostics.doctor import check_nfqueue_ready
+        n = len([i for i in list_interfaces() if i not in ("lo", "<none>", "af_packet")])
+        self.arp_status.setText(self._engine_note(n, check_nfqueue_ready().ok))
+
     # ---- ARP ----------------------------------------------------------------
     def _arp_box(self) -> QGroupBox:
         box = QGroupBox("ARP man-in-the-middle — discover a segment, pick victims, MITM")
@@ -153,6 +170,7 @@ class AttacksPanel(QWidget):
                                        "— hold/edit victim packets in the Intercept tab")
         self.arp_intercept.setToolTip("With MITM active, divert the victim's forwarded "
                                       "packets through the rule engine + interactive intercept")
+        self.arp_intercept.toggled.connect(self._on_intercept_toggled)
         v.addWidget(self.arp_intercept)
 
         self.arp_hosts = QTableWidget(0, 2)

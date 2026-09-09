@@ -542,10 +542,34 @@ class MainWindow(QMainWindow):
         i = rows[0].row()
         return self.packets[i][1].data if i < len(self.packets) else None
 
+    def _usable_iface_count(self) -> int:
+        return len([i for i in list_interfaces()
+                    if i not in ("lo", "<none>", "af_packet")])
+
+    def _engine_advice(self, mitm_active: bool = False):
+        """Recommend an inline engine (bridge vs NFQUEUE) for the detected host."""
+        from reforge.diagnostics.doctor import (
+            check_nfqueue_ready,
+            recommend_inline_engine,
+        )
+        return recommend_inline_engine(self._usable_iface_count(),
+                                       check_nfqueue_ready().ok, mitm_active)
+
     def _on_mode_changed(self, mode: str) -> None:
         bridge = mode == "Bridge"
         self.peer_label.setVisible(bridge)
         self.peer_combo.setVisible(bridge)
+        if not bridge:
+            return
+        adv = self._engine_advice()
+        if adv.engine == "bridge":
+            self.statusBar().showMessage("Bridge engine: " + adv.reason + ". " + adv.alternative)
+        elif adv.engine == "nfqueue":       # recommender steered away — usually <2 NICs
+            self.statusBar().showMessage(
+                "⚠ Bridge needs two interfaces — " + adv.reason +
+                " (Attacks → MITM + “Intercept & rewrite”).")
+        else:
+            self.statusBar().showMessage("⚠ " + adv.reason + " — " + adv.alternative)
 
     def on_start(self) -> None:
         if self.mode_combo.currentText() == "Bridge":

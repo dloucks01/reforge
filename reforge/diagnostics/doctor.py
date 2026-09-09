@@ -212,6 +212,55 @@ def inline_blockers(ifaces: list[str] | None = None) -> list[Check]:
     return [c for c in run_inline_preflight(ifaces) if not c.ok]
 
 
+@dataclass
+class EngineAdvice:
+    """A recommendation between the two inline engines, with the trade-off named."""
+    engine: str | None          # "bridge" | "nfqueue" | None (neither ready)
+    reason: str                 # why this engine fits the detected topology
+    tradeoff: str               # what it costs / demands
+    alternative: str            # the other engine and when to prefer it
+
+
+_BRIDGE_TRADEOFF = ("both NICs are dedicated (no IP, promiscuous, offloads off) and "
+                    "you must sit physically between the two cables")
+_NFQUEUE_TRADEOFF = ("needs root, nft + netfilterqueue, IP forwarding and a FORWARD-accept "
+                     "policy; you appear as an extra L3 hop and the poisoning is detectable")
+_ALT_BRIDGE = ("Two NICs and can splice the link? A userspace Bridge is a transparent L2 "
+               "tap — no poisoning, no routing footprint.")
+_ALT_NFQUEUE = ("One NIC only? Pair NFQUEUE with an ARP/NDP MITM to get on-path by poisoning "
+                "instead.")
+
+
+def recommend_inline_engine(iface_count: int, nfqueue_ok: bool,
+                            mitm_active: bool = False) -> EngineAdvice:
+    """Guide the choice between the two inline engines from the host's topology.
+
+    - Userspace bridge: a transparent L2 tap between two segments. Needs two
+      dedicated NICs; no poisoning, no L3 footprint. Best for a wired inline splice.
+    - NFQUEUE: relays a MITM'd/routed flow through the kernel FORWARD chain into the
+      rule engine. One NIC; needs the nfqueue stack + forwarding. Best when you are
+      already on-path via poisoning, or the host is the gateway.
+    """
+    can_bridge = iface_count >= 2
+    if mitm_active and nfqueue_ok:
+        return EngineAdvice("nfqueue",
+            "a MITM is active — relay the poisoned flow through the kernel FORWARD chain",
+            _NFQUEUE_TRADEOFF, _ALT_BRIDGE)
+    if can_bridge:
+        return EngineAdvice("bridge",
+            "two interfaces available — a transparent L2 tap needs no poisoning and "
+            "leaves no L3 footprint", _BRIDGE_TRADEOFF, _ALT_NFQUEUE)
+    if nfqueue_ok:
+        return EngineAdvice("nfqueue",
+            "a single interface — pair NFQUEUE with an ARP/NDP MITM to get on-path",
+            _NFQUEUE_TRADEOFF, _ALT_BRIDGE)
+    return EngineAdvice(None,
+        "no inline engine ready",
+        "need a second interface for a Bridge, or netfilterqueue + nft for NFQUEUE",
+        "Attach a second NIC, or install the nfqueue stack (apt install nftables "
+        "python3-netfilterqueue).")
+
+
 CHECKS: list[Callable[[], Check]] = [
     _check_python,
     _check_scapy,

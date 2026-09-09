@@ -98,3 +98,22 @@ def test_inline_blockers_is_subset_of_failures():
 def test_inline_checks_included_in_full_doctor():
     names = {c.name for c in doctor.run_checks()}
     assert {"forward-policy", "rp-filter", "nfqueue-ready"} <= names
+
+
+# ---- inline engine recommendation -----------------------------------------
+def test_recommend_inline_engine_matrix():
+    from reforge.diagnostics.doctor import recommend_inline_engine as rec
+    # a live MITM + nfqueue -> relay through NFQUEUE
+    a = rec(iface_count=1, nfqueue_ok=True, mitm_active=True)
+    assert a.engine == "nfqueue" and "MITM" in a.reason and a.alternative
+    # two NICs, no MITM -> a transparent bridge is the clean choice
+    a = rec(iface_count=2, nfqueue_ok=True, mitm_active=False)
+    assert a.engine == "bridge" and "two interfaces" in a.reason
+    # two NICs but nfqueue stack absent -> still bridge
+    assert rec(iface_count=2, nfqueue_ok=False).engine == "bridge"
+    # one NIC, no MITM yet, nfqueue ready -> NFQUEUE (pair with a MITM)
+    a = rec(iface_count=1, nfqueue_ok=True, mitm_active=False)
+    assert a.engine == "nfqueue" and "single interface" in a.reason
+    # one NIC and no nfqueue stack -> neither engine is ready
+    a = rec(iface_count=1, nfqueue_ok=False)
+    assert a.engine is None and "second interface" in a.tradeoff
