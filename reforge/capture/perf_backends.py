@@ -19,10 +19,11 @@ import shutil
 from pathlib import Path
 from typing import Iterable
 
+from reforge.capture import fastpath
 from reforge.capture.base import BackendCaps, CaptureBackend, Frame
 
-_FASTPATH_MSG = ("high-rate data plane not present in this build; install the "
-                 "fast-path component (see docs/DEPLOYMENT.md)")
+_FASTPATH_MSG = ("high-rate data plane not installed; build + install the "
+                 "fast-path component (see docs/FAST-PATH.md)")
 
 
 def _kernel_ge(major: int, minor: int) -> bool:
@@ -38,18 +39,39 @@ class _PerfBackend(CaptureBackend):
         if not ifaces:
             raise ValueError("performance backend needs at least one interface")
         self.ifaces = ifaces
+        self._opts = kw
+        self._provider = None       # the installed compiled data plane, once open()ed
 
     def open(self) -> None:
-        raise NotImplementedError(f"{self.caps.name}: {_FASTPATH_MSG}")
+        # Delegate to the installed fast-path component if present; otherwise the
+        # data plane isn't here — say so and point at how to build it.
+        self._provider = fastpath.load_provider(self.caps.name, self.ifaces, **self._opts)
+        if self._provider is None:
+            raise NotImplementedError(f"{self.caps.name}: {_FASTPATH_MSG}")
+        self._provider.open()
 
     def recv_burst(self, max_frames: int = 64, timeout: float = 0.5) -> list[Frame]:
-        raise NotImplementedError(f"{self.caps.name}: {_FASTPATH_MSG}")
+        if self._provider is None:
+            raise NotImplementedError(f"{self.caps.name}: {_FASTPATH_MSG}")
+        return self._provider.recv_burst(max_frames, timeout)
 
     def send_burst(self, frames: Iterable[Frame]) -> int:
-        raise NotImplementedError(f"{self.caps.name}: {_FASTPATH_MSG}")
+        if self._provider is None:
+            raise NotImplementedError(f"{self.caps.name}: {_FASTPATH_MSG}")
+        return self._provider.send_burst(frames)
+
+    def capture_stats(self) -> dict:
+        if self._provider is not None and hasattr(self._provider, "capture_stats"):
+            return self._provider.capture_stats()
+        return {"received": 0, "dropped": 0}
 
     def close(self) -> None:
-        pass
+        if self._provider is not None:
+            try:
+                self._provider.close()
+            except Exception:
+                pass
+            self._provider = None
 
 
 class AfXdpBackend(_PerfBackend):

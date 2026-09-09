@@ -75,7 +75,8 @@ and `reforge.perf.tuning` provide the exact commands.
 > them, so capture scales with CPU cores. Beyond that, the kernel-bypass data
 > planes (AF_XDP/PF_RING/DPDK zero-copy rings) require a compiled fast-path
 > component delivered per deployment; without it Reforge runs on AF_PACKET and
-> tells you what's missing. See PLAN.md sections 3 and 12.
+> tells you what's missing. **Building and installing that component is covered
+> in [FAST-PATH.md](FAST-PATH.md).** See also PLAN.md sections 3 and 12.
 
 ## 6. Troubleshooting
 
