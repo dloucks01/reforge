@@ -13,6 +13,7 @@ authors = [{ name = "Reforge project" }]
 dependencies = [
     "scapy>=2.7",
     "PySide6>=6.6",
+    "cryptography>=41",   # TLS-intercept dynamic CA (attacks/tls_ca) + artifact vault
     # netfilterqueue is installed via the distro package (python3-netfilterqueue)
     # because it needs libnetfilter-queue headers to build.
 ]
