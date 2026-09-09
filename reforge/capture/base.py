@@ -23,6 +23,7 @@ class Frame:
 
     data: bytes
     ingress: str = ""
+    egress: str = ""
     meta: dict = field(default_factory=dict)
 
 
@@ -35,6 +36,10 @@ class BackendCaps:
     inject: bool = True             # can transmit crafted frames
     max_speed_hint: str = "1G"      # rough ceiling: 1G / 10G / 40G / 100G
     needs_root: bool = True
+    # False means the host may *support* the tech (is_available can be True) but
+    # this build has no working data plane, so open() will raise. recommend_backend
+    # must not pick such a backend even when detected.
+    has_dataplane: bool = True
     notes: str = ""
 
 

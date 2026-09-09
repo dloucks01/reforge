@@ -39,8 +39,9 @@ This is a strong **inline manipulation core**. The gaps below are mostly
    - **sslstrip / HSTS bypass**, HTTPS→HTTP downgrade, content & JS injection,
      response tampering, cookie/session manipulation, BeEF-style hook injection,
      **on-the-fly file replacement** (swap a download for a payload).
-4. **Smart / intelligent fuzzing** (see the dedicated section below). *Requested;
-   building first.*
+4. **Smart / intelligent fuzzing** — DELIVERED (reforge/fuzzing/): field-aware /
+   dictionary / structure-aware mutators, pcap corpus, response-feedback monitor,
+   stateful prefix, minimization, per-field coverage, persistence (see below).
 
 ### Tier 2 — force multipliers
 
@@ -67,7 +68,7 @@ This is a strong **inline manipulation core**. The gaps below are mostly
 
 ---
 
-## Smart fuzzing — design (Tier 1, building now)
+## Smart fuzzing — design (Tier 1, DELIVERED)
 
 Today's `craft.fuzz` is *dumb* byte/bit mutation. "Smart" fuzzing adds
 structure-awareness, guidance, state, and observation:
@@ -98,11 +99,21 @@ Delivered incrementally: strategies + corpus + monitor + campaign runner first
 (all offline-testable with a fake sender/target), then live send integration and
 a GUI campaign panel.
 
+**Status (2026-09): shipped.** `reforge/fuzzing/` implements all four mutator
+strategies, pcap seeding (layer-filtered), the response-feedback monitor
+(normal/no-response/reset/error/slow/crash), a reproducible campaign runner with
+per-case seeds, **stateful fuzzing** (a valid packet prefix replayed before each
+case), **test-case minimization** (`minimize.py`, ddmin), **corpus/findings
+persistence** (save/replay to disk), **rate/pacing + a wall-clock budget**, and
+**per-field coverage** in the report. The GUI Fuzzing panel drives it (seed,
+strategies, rate, live campaign, save results). Offline-tested end to end.
+
 ---
 
 ## Recommended sequence
 
-1. **Smart fuzzing engine** (requested) — strategies, corpus, monitor, campaign.
+1. **Smart fuzzing engine** (requested) — DELIVERED (strategies, corpus, monitor,
+   campaign, stateful, minimization, persistence, coverage).
 2. **Credential harvester** + **active MITM modules** (ARP/DNS/DHCP/LLMNR).
 3. **HTTP attack toolkit** (sslstrip/injection/file-replace).
 4. **TLS interception**, then recon/fingerprinting and evasion.

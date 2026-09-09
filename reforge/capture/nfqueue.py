@@ -30,6 +30,7 @@ class NfqStats:
     modified: int = 0
     dropped: int = 0
     held: int = 0
+    injected: int = 0
     errors: int = 0
 
     def as_dict(self) -> dict:
@@ -38,14 +39,20 @@ class NfqStats:
 
 class NfqueueRunner:
     def __init__(self, engine: RuleEngine, queue_num: int = 1, intercept=None,
-                 seq_fixer=None):
+                 seq_fixer=None, injector=None):
         self.engine = engine
         self.queue_num = queue_num
         self.intercept = intercept   # optional InterceptQueue for interactive HOLD
         self.seq_fixer = seq_fixer   # keeps TCP flows in sync after length-changing edits
+        # injector(raw_ip_bytes) transmits an injected/duplicated packet. NFQUEUE
+        # only carries a verdict for the ONE queued packet, so extra sends need a
+        # separate raw socket. Injectable for tests; a live L3 sender is built
+        # lazily in run() when none is supplied.
+        self.injector = injector
         self.stats = NfqStats()
         self._nfq = None
         self._running = False
+        self._l3sock = None
 
     @staticmethod
     def _flow_key(raw: bytes):
@@ -97,7 +104,40 @@ class NfqueueRunner:
             self.stats.modified += 1
         self.stats.accepted += 1
         nfq_packet.accept()
-        # NB: res.extra (injected/duplicated) needs a raw send socket — Phase 3.
+        # injected/duplicated packets ride a separate raw socket (the verdict only
+        # covers the one queued packet)
+        if res.extra:
+            self._emit_extra(res.extra)
+
+    def _emit_extra(self, extras: list[bytes]) -> None:
+        for raw in extras:
+            try:
+                self._inject(raw)
+                self.stats.injected += 1
+            except Exception:
+                self.stats.errors += 1
+                log.debug("inject failed", exc_info=True)
+
+    def _inject(self, raw: bytes) -> None:
+        if self.injector is not None:
+            self.injector(raw)
+            return
+        self._live_inject(raw)
+
+    def _live_inject(self, raw: bytes) -> None:  # pragma: no cover (needs root + net)
+        """Default injector: send an IP-layer packet at L3 (kernel routes it)."""
+        import socket
+
+        from scapy.layers.inet import IP
+        from scapy.layers.inet6 import IPv6
+
+        if self._l3sock is None:
+            self._l3sock = socket.socket(socket.AF_INET, socket.SOCK_RAW,
+                                         socket.IPPROTO_RAW)
+        pkt = (IPv6 if raw and (raw[0] >> 4) == 6 else IP)(raw)
+        dst = getattr(pkt, "dst", None)
+        if dst:
+            self._l3sock.sendto(raw, (dst, 0))
 
     def _park(self, nfq_packet, raw: bytes) -> bool:
         """Divert a HELD packet to the intercept queue; verdict issued on resolve.
@@ -155,6 +195,12 @@ class NfqueueRunner:
             except Exception:
                 pass
             s.close()
+            if self._l3sock is not None:
+                try:
+                    self._l3sock.close()
+                except Exception:
+                    pass
+                self._l3sock = None
             # drop the NetfilterQueue so its netlink socket is freed now, not at
             # GC — otherwise a quick rebind of the same queue number can fail with
             # "Failed to create queue".

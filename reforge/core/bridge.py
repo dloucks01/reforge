@@ -110,6 +110,11 @@ class UserspaceBridge:
         # forever. We remember recently-sent bytes briefly and skip their echo.
         self._sent: dict[bytes, float] = {}
         self._suppress_ttl = 0.5
+        # An interactive HOLD is resolved on the GUI thread, whose release closure
+        # sends on the same L2 socket as the loop thread and touches _sent + the
+        # counters. Serialize every transmit + shared-state mutation so the two
+        # threads can't interleave a send (wire corruption) or race the dict.
+        self._io_lock = threading.RLock()
 
     def set_seq_fixup(self, on: bool, position_aware: bool = False) -> None:
         """Enable/disable stateful TCP seq/ack fix-ups (resets flow state).
@@ -145,8 +150,7 @@ class UserspaceBridge:
         self._observe(ingress, data)
 
         if not self.armed:                      # pass-through (safe mode)
-            send_peer(data)
-            self._remember_sent(data)
+            self._emit(send_peer, data)
             self.counters.forwarded += 1
             self._bump_dir(ingress, 1)
             return
@@ -158,8 +162,7 @@ class UserspaceBridge:
         except Exception:
             self.counters.errors += 1
             log.exception("engine error; forwarding original frame")
-            send_peer(data)
-            self._remember_sent(data)
+            self._emit(send_peer, data)
             self.counters.forwarded += 1
             return
 
@@ -173,14 +176,13 @@ class UserspaceBridge:
                 return
             self.counters.held += 1
             # no interception queue attached: pass through
-            send_peer(data)
-            self._remember_sent(data)
+            self._emit(send_peer, data)
             self.counters.forwarded += 1
             self._bump_dir(ingress, 1)
             return
 
         if res.delay_s:
-            time.sleep(res.delay_s)
+            self._sleep_delay(res.delay_s)
 
         out = res.out if res.out is not None else data
         # Ordering: if an earlier packet of this flow is held for interception,
@@ -196,8 +198,7 @@ class UserspaceBridge:
                                                self._inject_release(ingress, send_peer), fk) \
                         or self._send_injected(ingress, send_peer, extra)
                 return
-        send_peer(out)
-        self._remember_sent(out)
+        self._emit(send_peer, out)
         self.counters.forwarded += 1
         self._bump_dir(ingress, 1)
         if res.modified:
@@ -234,8 +235,7 @@ class UserspaceBridge:
             if out_bytes is None:
                 self.counters.dropped += 1
                 return
-            _send(out_bytes)
-            self._remember_sent(out_bytes)
+            self._emit(_send, out_bytes)
             self.counters.forwarded += 1
             self._bump_dir(_ingress, 1)
             if out_bytes != _orig:
@@ -247,16 +247,14 @@ class UserspaceBridge:
         def release(out_bytes, *, _ingress=ingress, _send=send_peer):
             if out_bytes is None:
                 return
-            _send(out_bytes)
-            self._remember_sent(out_bytes)
+            self._emit(_send, out_bytes)
             self.counters.injected += 1
             self.counters.forwarded += 1
             self._bump_dir(_ingress, 1)
         return release
 
     def _send_injected(self, ingress: str, send_peer, extra: bytes) -> None:
-        send_peer(extra)
-        self._remember_sent(extra)
+        self._emit(send_peer, extra)
         self.counters.injected += 1
         self.counters.forwarded += 1
         self._bump_dir(ingress, 1)
@@ -280,8 +278,7 @@ class UserspaceBridge:
         if self.intercept.passthrough(ingress, data,
                                       self._egress_release(ingress, send_peer, data), fk):
             return                              # queued behind an earlier held packet
-        send_peer(data)
-        self._remember_sent(data)
+        self._emit(send_peer, data)
         self.counters.forwarded += 1
         self._bump_dir(ingress, 1)
 
@@ -300,19 +297,46 @@ class UserspaceBridge:
             self.intercept = saved
         return sends
 
+    def _emit(self, send_peer, data: bytes) -> None:
+        """Transmit + record the send under the I/O lock, so the loop thread and a
+        GUI-thread interception release never interleave on the socket or _sent."""
+        with self._io_lock:
+            send_peer(data)
+            self._sent[data] = time.monotonic() + self._suppress_ttl
+
     def _remember_sent(self, data: bytes) -> None:
-        self._sent[data] = time.monotonic() + self._suppress_ttl
+        with self._io_lock:
+            self._sent[data] = time.monotonic() + self._suppress_ttl
 
     def _is_own_echo(self, data: bytes) -> bool:
         now = time.monotonic()
-        expiry = self._sent.get(data)
-        if expiry is not None and expiry > now:
-            del self._sent[data]  # consume the one echo we expect
-            return True
-        # opportunistic prune of stale entries
-        if len(self._sent) > 4096:
-            self._sent = {k: v for k, v in self._sent.items() if v > now}
+        with self._io_lock:
+            expiry = self._sent.get(data)
+            if expiry is not None and expiry > now:
+                del self._sent[data]  # consume the one echo we expect
+                return True
+            # opportunistic prune of stale entries
+            if len(self._sent) > 4096:
+                self._sent = {k: v for k, v in self._sent.items() if v > now}
         return False
+
+    def _sleep_delay(self, delay_s: float) -> None:
+        """Apply a rule `delay` without tripping the watchdog.
+
+        The delay blocks this frame inline (the honest cost of an inline delay),
+        but we refresh the heartbeat in small chunks so the watchdog does not read
+        the pause as a stalled bridge and fail the wire open. Headless
+        (process_frame, loop not running) returns immediately so tests never sleep.
+        """
+        if not self._running.is_set():
+            return
+        end = time.monotonic() + delay_s
+        while self._running.is_set():
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(remaining, 0.2))
+            self._heartbeat = time.monotonic()
 
     def _observe(self, ingress: str, data: bytes) -> None:
         if not self.tap:

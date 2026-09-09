@@ -54,7 +54,7 @@ class _PerfBackend(CaptureBackend):
 
 class AfXdpBackend(_PerfBackend):
     caps = BackendCaps(name="af_xdp", l2_rewrite=True, inject=True,
-                       max_speed_hint="10-40G", needs_root=True,
+                       max_speed_hint="10-40G", needs_root=True, has_dataplane=False,
                        notes="Kernel-bypass-lite; needs XDP-capable driver.")
 
     @classmethod
@@ -70,7 +70,7 @@ class AfXdpBackend(_PerfBackend):
 
 class PfRingBackend(_PerfBackend):
     caps = BackendCaps(name="pf_ring", l2_rewrite=True, inject=True,
-                       max_speed_hint="10-100G", needs_root=True,
+                       max_speed_hint="10-100G", needs_root=True, has_dataplane=False,
                        notes="Zero-copy; needs PF_RING kernel module.")
 
     @classmethod
@@ -82,7 +82,7 @@ class PfRingBackend(_PerfBackend):
 
 class DpdkBackend(_PerfBackend):
     caps = BackendCaps(name="dpdk", l2_rewrite=True, inject=True,
-                       max_speed_hint="100G", needs_root=True,
+                       max_speed_hint="100G", needs_root=True, has_dataplane=False,
                        notes="Poll-mode driver; hugepages + NIC binding.")
 
     @classmethod

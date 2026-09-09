@@ -33,6 +33,70 @@ def _check_iface(iface: str) -> str:
 # Offloads that must be OFF so captured/forwarded bytes match the wire.
 OFFLOADS = ["tso", "gso", "gro", "lro", "rx", "tx", "sg", "rxvlan", "txvlan"]
 
+# ethtool -K short name -> the long feature name `ethtool -k` prints, so we can
+# read the CURRENT state of each offload for an exact revert.
+_OFFLOAD_LONGNAME = {
+    "tso": "tcp-segmentation-offload",
+    "gso": "generic-segmentation-offload",
+    "gro": "generic-receive-offload",
+    "lro": "large-receive-offload",
+    "rx": "rx-checksumming",
+    "tx": "tx-checksumming",
+    "sg": "scatter-gather",
+    "rxvlan": "rx-vlan-offload",
+    "txvlan": "tx-vlan-offload",
+}
+
+
+class HostState:
+    """Reads an interface's current state so revert can restore it exactly.
+
+    Every method returns None when the state can't be determined, in which case
+    the caller falls back to the historical fixed-value assumption. Injectable so
+    the revert logic is unit-testable without root."""
+
+    def offload_on(self, iface: str, feat: str) -> bool | None:
+        raise NotImplementedError
+
+    def has_flag(self, iface: str, flag: str) -> bool | None:   # flag: promisc|allmulti
+        raise NotImplementedError
+
+    def ipv6_disabled(self, iface: str) -> bool | None:
+        raise NotImplementedError
+
+
+class LiveHostState(HostState):
+    """Best-effort live reader via ethtool / ip / sysctl."""
+
+    def offload_on(self, iface: str, feat: str) -> bool | None:
+        long = _OFFLOAD_LONGNAME.get(feat, feat)
+        out = _run(["ethtool", "-k", iface]).stdout
+        for line in out.splitlines():
+            name, _, val = line.partition(":")
+            if name.strip() == long:
+                return val.strip().startswith("on")
+        return None
+
+    def has_flag(self, iface: str, flag: str) -> bool | None:
+        out = _run(["ip", "-d", "link", "show", iface]).stdout
+        if not out:
+            return None
+        token = {"promisc": "PROMISC", "allmulti": "ALLMULTI"}[flag]
+        return token in out
+
+    def ipv6_disabled(self, iface: str) -> bool | None:
+        out = _run(["sysctl", "-n", f"net.ipv6.conf.{iface}.disable_ipv6"]).stdout.strip()
+        if out in ("0", "1"):
+            return out == "1"
+        return None
+
+
+def _restore_state(apply: bool, state: HostState | None) -> HostState | None:
+    """Use the caller's reader, or a live one when actually applying changes."""
+    if state is not None:
+        return state
+    return LiveHostState() if apply else None
+
 
 @dataclass
 class RevertJournal:
@@ -57,19 +121,33 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
 
-def prepare_capture_iface(iface: str, journal: RevertJournal, apply: bool = False) -> list[list[str]]:
+def prepare_capture_iface(iface: str, journal: RevertJournal, apply: bool = False,
+                          state: HostState | None = None) -> list[list[str]]:
     """Return (and optionally execute) the commands to make `iface` capture-ready.
 
-    - disable offloads (record current state for revert)
+    - disable offloads
     - up + promisc + allmulti
     - flush IPv4/IPv6 addresses, disable IPv6 autoconf
+
+    The revert journal records the interface's ACTUAL prior state (read via
+    `state`, or a live reader when `apply=True`), so restoring an interface that
+    already had, say, promisc on or an offload off leaves it as it was found —
+    not forced back to a hardcoded default. When the prior state is unknown
+    (plan-only, no reader), it falls back to the historical assumption.
     """
     _check_iface(iface)
+    st = _restore_state(apply, state)
     planned: list[list[str]] = []
 
     for feat in OFFLOADS:
         planned.append(["ethtool", "-K", iface, feat, "off"])
-        journal.record(["ethtool", "-K", iface, feat, "on"])
+        prior = st.offload_on(iface, feat) if st else None
+        restore = "off" if prior is False else "on"     # unknown -> assume was on
+        journal.record(["ethtool", "-K", iface, feat, restore])
+
+    prior_promisc = st.has_flag(iface, "promisc") if st else None
+    prior_allmulti = st.has_flag(iface, "allmulti") if st else None
+    prior_ipv6_disabled = st.ipv6_disabled(iface) if st else None
 
     planned += [
         ["ip", "link", "set", iface, "up"],
@@ -78,9 +156,12 @@ def prepare_capture_iface(iface: str, journal: RevertJournal, apply: bool = Fals
         ["ip", "addr", "flush", "dev", iface],
         ["sysctl", "-w", f"net.ipv6.conf.{iface}.disable_ipv6=1"],
     ]
-    journal.record(["ip", "link", "set", iface, "promisc", "off"])
-    journal.record(["ip", "link", "set", iface, "allmulticast", "off"])
-    journal.record(["sysctl", "-w", f"net.ipv6.conf.{iface}.disable_ipv6=0"])
+    journal.record(["ip", "link", "set", iface, "promisc",
+                    "on" if prior_promisc else "off"])
+    journal.record(["ip", "link", "set", iface, "allmulticast",
+                    "on" if prior_allmulti else "off"])
+    journal.record(["sysctl", "-w", f"net.ipv6.conf.{iface}.disable_ipv6="
+                    + ("1" if prior_ipv6_disabled else "0")])
 
     if apply:
         for cmd in planned:
@@ -92,7 +173,7 @@ def prepare_capture_iface(iface: str, journal: RevertJournal, apply: bool = Fals
 
 
 def prepare_bridge(if_a: str, if_b: str, journal: RevertJournal,
-                   apply: bool = False) -> list[list[str]]:
+                   apply: bool = False, state: HostState | None = None) -> list[list[str]]:
     """Prepare BOTH interfaces for a userspace transparent bridge.
 
     Each interface: offloads off, promisc + allmulti, no IP; plus host-stack
@@ -102,7 +183,7 @@ def prepare_bridge(if_a: str, if_b: str, journal: RevertJournal,
     _check_iface(if_a); _check_iface(if_b)
     planned: list[list[str]] = []
     for iface in (if_a, if_b):
-        planned += prepare_capture_iface(iface, journal, apply=apply)
+        planned += prepare_capture_iface(iface, journal, apply=apply, state=state)
         planned += suppress_host_stack(iface, journal, apply=apply)
     return planned
 
@@ -162,16 +243,26 @@ def suppress_host_stack(iface: str, journal: RevertJournal, apply: bool = False)
     fight its own kernel (PLAN.md section 6). Uses nftables.
     """
     _check_iface(iface)
+    # The inet family carries only IPv4/IPv6, so a host-originated RST drop lives
+    # here — but ARP is NOT seen by an inet hook. Host ARP must be dropped in a
+    # dedicated `arp`-family table, or the suppression silently never matches.
+    # Flush each chain first so repeated calls don't stack duplicate rules.
     planned = [
         ["nft", "add", "table", "inet", "reforge"],
         ["nft", "add", "chain", "inet", "reforge", "out",
          "{ type filter hook output priority 0 ; }"],
+        ["nft", "flush", "chain", "inet", "reforge", "out"],
         ["nft", "add", "rule", "inet", "reforge", "out",
          "oifname", iface, "tcp", "flags", "rst", "drop"],
-        ["nft", "add", "rule", "inet", "reforge", "out",
-         "oifname", iface, "arp", "drop"],
+        ["nft", "add", "table", "arp", "reforge"],
+        ["nft", "add", "chain", "arp", "reforge", "out",
+         "{ type filter hook output priority 0 ; }"],
+        ["nft", "flush", "chain", "arp", "reforge", "out"],
+        ["nft", "add", "rule", "arp", "reforge", "out",
+         "meta", "oifname", iface, "drop"],
     ]
     journal.record(["nft", "delete", "table", "inet", "reforge"])
+    journal.record(["nft", "delete", "table", "arp", "reforge"])
     if apply:
         for cmd in planned:
             _run(cmd)
