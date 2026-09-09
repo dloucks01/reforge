@@ -264,8 +264,14 @@ def test_intercept_length_change_warns(app):
 
 
 def test_mode_change_to_bridge_shows_engine_guidance(app, monkeypatch):
+    import types
+
+    import reforge.diagnostics.doctor as doctor
     import reforge.gui.main_window as MW
     win = _win(app)
+    # pin nfqueue-ready so the guidance depends only on the NIC count, not on
+    # whether the CI/host has the nftables/netfilterqueue stack installed
+    monkeypatch.setattr(doctor, "check_nfqueue_ready", lambda: types.SimpleNamespace(ok=True))
     # two NICs present -> Inline (bridge) affirmed as the clean transparent tap
     monkeypatch.setattr(MW, "list_interfaces", lambda: ["eth0", "eth1"])
     win._on_mode_changed("Inline")
