@@ -313,4 +313,5 @@ suite grew from 609 to 649 passing.
 
 **Still open** (larger, separate efforts)
 
-- §2.8 built-in custom dissectors, §4 wireless / real fast-path data plane.
+- §2.8 built-in custom dissectors, §4 real fast-path data plane. (Wireless
+  (802.11) is on indefinite hold — see CAPABILITY-GAPS item 10.)

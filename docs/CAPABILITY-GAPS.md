@@ -62,7 +62,9 @@ This is a strong **inline manipulation core**. The gaps below are mostly
 ### Tier 3 — larger/independent efforts
 
 10. **Wireless (802.11):** monitor mode, deauth, evil-twin, WPA handshake
-    capture + injection (separate adapter/domain).
+    capture + injection (separate adapter/domain). **ON INDEFINITE HOLD** — not
+    planned for now (a separate RF domain + hardware); revisit only if an
+    engagement requires it.
 11. **Real high-rate data plane** — PARTIAL (reforge/capture/rawsocket.py): raw AF_PACKET (bytes-level, no Scapy on the hot path) delivered; AF_XDP/PF_RING/DPDK fast-path (today we
     detect capability; the zero-copy loop is a compiled component).
 12. **Distributed / multi-sensor** — DELIVERED (reforge/distributed/): multiple sensors report to a central collector.
@@ -119,4 +121,5 @@ strategies, rate, live campaign, save results). Offline-tested end to end.
 2. **Credential harvester** + **active MITM modules** (ARP/DNS/DHCP/LLMNR).
 3. **HTTP attack toolkit** (sslstrip/injection/file-replace).
 4. **TLS interception**, then recon/fingerprinting and evasion.
-5. Wireless, real fast-path, distributed — as the engagement profile demands.
+5. Real fast-path, distributed — as the engagement profile demands. (Wireless is
+   on indefinite hold — see item 10.)

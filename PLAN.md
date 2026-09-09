@@ -264,7 +264,7 @@ Common-issue guide shipped with the app (no internet): "captures show 30 KB pack
 
 ## 13. Optional later modules
 - TLS interception (cert-injection proxy) for HTTPS content edits.
-- Wireless (802.11) monitor-mode capture/injection.
+- Wireless (802.11) monitor-mode capture/injection. [ON INDEFINITE HOLD]
 - Distributed/multi-sensor operation and a central console.
 
 ---
