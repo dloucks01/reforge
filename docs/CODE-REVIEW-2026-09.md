@@ -251,12 +251,32 @@ suite grew from 609 to 649 passing.
   capture data plane needs CAP_NET_RAW in the app process and cannot be delegated
   over IPC; the helper takes over the network config only.
 
-**Deferred to the GUI pass** (they touch the GUI being reworked)
+**GUI pass — done**
 
-- **§3.8** blocking nft subprocess on the Qt UI thread (move to a worker).
-- **§3.12** per-tick UI work (drain/refresh/dry-run) under load.
-- Wiring the GUI's _start_inline/_stop_inline through HelperClient so the GUI can
-  run unprivileged when a helper is present.
+- **GUI wiring through HelperClient** — _start_inline/_stop_inline now install and
+  remove the NFQUEUE diversion rules via the privileged helper when a helper
+  socket is present (one IPC batch), falling back to direct nft when the GUI is
+  itself privileged.
+- **§3.8 (improved)** — routing through the helper collapses N per-call
+  subprocess spawns on the UI thread into a single IPC round trip. The no-helper
+  (root GUI) fallback still applies nft synchronously; moving that fully off the
+  UI thread is a smaller follow-up.
+- **§3.12** — the drain timer now runs only row-flush + hold-reap every 100 ms
+  tick; the heavy refreshes (held-packet re-dissect, health meter, recon
+  inventory, flows table) run at 1/5 that rate (_SLOW_TICK_EVERY).
+
+**GUI pass — layout (done)**
+
+- Attack panel clipping fixed (sections hosted in a scroll area).
+- Live workspace favors the packet stream by default and grows the editor only
+  once interception is armed; the Intercept apparatus collapses to a hint when off.
+- Session-bar pill states the mode; the live packet/loss count stays in the
+  bottom status bar (no more duplication).
+
+**GUI pass — remaining**
+
+- _dry_run_over_capture still iterates the whole capture synchronously on click.
+- The no-helper (root GUI) nft fallback still applies synchronously (see §3.8).
 
 **Not yet addressed** (lower priority / larger)
 

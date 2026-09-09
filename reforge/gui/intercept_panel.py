@@ -291,8 +291,30 @@ class InterceptPanel(QWidget):
 
         split.addWidget(editor)
         split.setSizes([140, 430])
+        self._body_split = split
         root.addWidget(split, 1)
+
+        # When intercept is off and nothing is held, collapse the whole hold/edit
+        # apparatus to a one-line hint so the Live workspace gives the packet
+        # stream the room instead of showing an empty editor.
+        self._collapsed_hint = QLabel(
+            "Enable Intercept above (or add a HOLD rule) to catch and edit packets.")
+        self._collapsed_hint.setStyleSheet("color: palette(mid); padding: 8px 2px;")
+        self._collapsed_hint.setWordWrap(True)
+        root.addWidget(self._collapsed_hint)
+
         self._set_buttons_enabled(False)
+        self._sync_body()
+
+    def _sync_body(self) -> None:
+        """Show the hold/edit apparatus only when intercept is active — enabled,
+        or holding packets (a rule-fed HOLD can fill the queue with the checkbox
+        off). Otherwise collapse to the one-line hint."""
+        active = (self.enable_check.isChecked()
+                  or self.table.rowCount() > 0
+                  or self.sent_table.rowCount() > 0)
+        self._body_split.setVisible(active)
+        self._collapsed_hint.setVisible(not active)
 
     def _dim(self, text: str) -> QLabel:
         lbl = QLabel(text)
@@ -367,6 +389,7 @@ class InterceptPanel(QWidget):
     def _apply_filter(self) -> None:
         """Compile the filter box and (via on_filter) install/clear a HOLD rule."""
         enabled = self.enable_check.isChecked()
+        self._sync_body()                        # expand/collapse the apparatus
         text = self.filter_edit.text().strip()
         if not enabled:
             if self.on_filter is not None:
@@ -462,6 +485,7 @@ class InterceptPanel(QWidget):
                     self.table.selectRow(r)
                     break
         self._apply_search()                    # keep the active search applied
+        self._sync_body()                       # a rule-fed HOLD can fill the queue
 
     # ---- detail / editing ---------------------------------------------------
     def _on_select(self) -> None:
@@ -738,6 +762,7 @@ class InterceptPanel(QWidget):
             self.sent_table.setItem(r, c, item)
         n_sent = self.sent_table.rowCount()
         self.queue_tabs.setTabText(1, f"Sent ({n_sent})")
+        self._sync_body()                        # keep the apparatus open with history
 
     def _send_to_builder(self, data) -> None:
         if data and self.on_send_to_builder is not None:

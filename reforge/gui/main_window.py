@@ -79,6 +79,10 @@ _WS_BLURB = {
 
 
 class MainWindow(QMainWindow):
+    # The drain timer ticks every 100 ms; the heavy refreshes run once every this
+    # many ticks (~500 ms) so they don't rebuild on every tick under load.
+    _SLOW_TICK_EVERY = 5
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} {VERSION} — {TAGLINE}")
@@ -463,8 +467,21 @@ class MainWindow(QMainWindow):
         outer = QSplitter(Qt.Vertical)
         outer.addWidget(self._live_top)
         outer.addWidget(lower)
-        outer.setSizes([260, 560])
+        # Capture-first default: the packet stream gets the room; the Intercept
+        # apparatus below is collapsed until armed (it grows via _set_live_split).
+        outer.setSizes([600, 260])
+        self._live_outer = outer
         return self._ws("live", outer)
+
+    # split presets for the Live workspace: stream-heavy when just capturing,
+    # editor-heavy once interception is armed
+    _LIVE_SPLIT_IDLE = [600, 260]
+    _LIVE_SPLIT_ARMED = [340, 520]
+
+    def _set_live_split(self, armed: bool) -> None:
+        outer = getattr(self, "_live_outer", None)
+        if outer is not None:
+            outer.setSizes(self._LIVE_SPLIT_ARMED if armed else self._LIVE_SPLIT_IDLE)
 
     def _refresh_flows(self) -> None:
         if not hasattr(self, "flows_table"):
@@ -693,6 +710,7 @@ class MainWindow(QMainWindow):
             self._intercept_filter = None
         else:
             self._intercept_filter = (match, text)
+        self._set_live_split(match is not None)   # give the editor room once armed
         if self.engine is not None:
             self._install_intercept_filter(self.engine)
             n = self.intercept.count() if self.intercept else 0
@@ -824,10 +842,23 @@ class MainWindow(QMainWindow):
         return "   ".join(w for w in (self._inline_preflight_warning(ifaces),
                                        self._message_proxy_warning()) if w)
 
+    def _helper(self):
+        """A privileged-helper client if a helper socket is present, else None.
+
+        When present, privileged nft config runs in the root helper (one IPC round
+        trip for the whole batch) instead of spawning N subprocesses on this — the
+        UI — thread; when absent, the caller applies the commands directly (the GUI
+        is then itself privileged, the existing behavior)."""
+        try:
+            from reforge.privhelper.ipc import HelperClient
+            client = HelperClient()
+            return client if client.available() else None
+        except Exception:
+            return None
+
     def _start_inline(self, iface: str, victims: list) -> str:
         """Divert a MITM'd victim's forwarded traffic into the rule engine +
         interactive intercept via NFQUEUE. Returns a status string."""
-        import subprocess
         import threading
 
         from reforge.capture.nfqueue import NfqueueRunner, nft_forward_queue_rules
@@ -840,9 +871,20 @@ class MainWindow(QMainWindow):
         queue = self._shared_intercept_queue()
         self.intercept_panel.set_transform_count(len(self._transforms))
 
-        install, self._nfq_remove = nft_forward_queue_rules(1, victims or None)
-        for cmd in install:
-            subprocess.run(cmd, capture_output=True, check=False)
+        # Install the NFQUEUE diversion rules. Prefer the privileged helper (one
+        # IPC call runs the whole batch and keeps its own teardown); otherwise fall
+        # back to running the commands here.
+        helper = self._helper()
+        if helper is not None:
+            helper.queue_install(1, victims or None)
+            self._nfq_via_helper = True
+            self._nfq_remove = []
+        else:
+            import subprocess
+            install, self._nfq_remove = nft_forward_queue_rules(1, victims or None)
+            self._nfq_via_helper = False
+            for cmd in install:
+                subprocess.run(cmd, capture_output=True, check=False)
         seq_fixer = None
         if self._auto_arm_seqfix():          # keep flows in sync on length-changing edits
             from reforge.core.flowrewrite import FlowRewriter
@@ -858,8 +900,6 @@ class MainWindow(QMainWindow):
         return "inline via NFQUEUE" + (f"  [{warn}]" if warn else "")
 
     def _stop_inline(self) -> None:
-        import subprocess
-
         runner = getattr(self, "_nfq_runner", None)
         if runner is not None:
             try:
@@ -874,8 +914,19 @@ class MainWindow(QMainWindow):
         if thread is not None:
             thread.join(timeout=3.0)
             self._nfq_thread = None
-        for cmd in getattr(self, "_nfq_remove", []):
-            subprocess.run(cmd, capture_output=True, check=False)
+        # remove the diversion rules the same way they were installed
+        if getattr(self, "_nfq_via_helper", False):
+            helper = self._helper()
+            if helper is not None:
+                try:
+                    helper.queue_remove()
+                except Exception:
+                    log.debug("helper queue_remove failed", exc_info=True)
+            self._nfq_via_helper = False
+        else:
+            import subprocess
+            for cmd in getattr(self, "_nfq_remove", []):
+                subprocess.run(cmd, capture_output=True, check=False)
         self._nfq_remove = []
 
     def _snapshot_engagement(self) -> None:
@@ -987,16 +1038,25 @@ class MainWindow(QMainWindow):
         return len(batch)
 
     def _drain(self) -> None:
-        """Timer handler: flush rows, refresh held packets, auto-stop when done."""
+        """Timer handler: flush rows, refresh held packets, auto-stop when done.
+
+        Row flushing and hold reaping run every 100 ms tick so capture stays
+        responsive; the heavier refreshes (re-dissecting held packets, the health
+        meter, recon inventory, the flows table) run at 1/5 that rate so they
+        don't rebuild every tick and stutter the UI under load."""
         if not self.service:
             return
+        self._tick = getattr(self, "_tick", 0) + 1
+        slow = (self._tick % self._SLOW_TICK_EVERY == 0)
         if self.intercept is not None:
-            self.intercept.reap()               # auto-release timed-out holds
-            self.intercept_panel.refresh_pending()
-            self._refresh_status_pill()         # keep the held count live
-        self.diag_panel.refresh_health()
-        self.recon_panel.refresh()
-        self._refresh_flows()
+            self.intercept.reap()               # auto-release timed-out holds (cheap)
+            self._refresh_status_pill()         # keep the held count live (cheap)
+            if slow:
+                self.intercept_panel.refresh_pending()   # re-dissects held packets
+        if slow:
+            self.diag_panel.refresh_health()
+            self.recon_panel.refresh()
+            self._refresh_flows()
         n = self._flush_rows()
         if n == 0 and not self.service.running:
             err = getattr(self.service, "error", None)
@@ -1051,7 +1111,9 @@ class MainWindow(QMainWindow):
             inline = hasattr(self.service, "armed")
             held = self.intercept.count() if self.intercept is not None else 0
             if not inline:
-                pill.setText(f"● Capturing · {len(self.packets)} pkts · read-only")
+                # the pill states the MODE (what editing does); the live packet /
+                # loss count lives in the bottom status bar, so they don't duplicate
+                pill.setText("● Capturing · read-only")
                 pill.setProperty("state", "capturing")
             else:
                 armed = bool(getattr(self.service, "armed", False))
