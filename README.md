@@ -1,5 +1,7 @@
 # Reforge
 
+[![CI](https://github.com/dloucks01/reforge/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dloucks01/reforge/actions/workflows/ci.yml)
+
 **Inline packet interception & manipulation suite.** Sit in the path of live traffic,
 **catch** the packets you care about, **edit** any header field or payload byte, and
 **forward** the modified packet in place of the original — or drop it. Also: craft
