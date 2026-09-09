@@ -302,8 +302,15 @@ suite grew from 609 to 649 passing.
 - **§3.18** — documented (no behavior change) why `strip_starttls` is listed as
   length-changing (defensive seq/ack arming).
 
-**Still open** (larger efforts, not LOW)
+**Credential harvesters — done (§2.4 complete)**
 
-- §2.4 remainder: LDAP simple-bind (BER decode), Telnet (char-at-a-time),
-  NTLMSSP and Kerberos hash capture — each a real feature, not a one-liner.
+- LDAP simple bind (BER decode), Telnet login (IAC-stripped, char-at-a-time),
+  NTLM over HTTP (NetNTLMv1/v2 hashcat hashes, challenge/response paired across
+  directions), and Kerberos AS-REQ pre-auth ($krb5pa$, hashcat -m 7500). All via
+  hand-rolled DER/NTLM parsers, packet-based `extract()` (Creds panel, sensor,
+  scenario harvest step). Stream-reassembled NTLM correlation is a possible
+  follow-up; single-segment auth is covered today.
+
+**Still open** (larger, separate efforts)
+
 - §2.8 built-in custom dissectors, §4 wireless / real fast-path data plane.

@@ -32,9 +32,11 @@ This is a strong **inline manipulation core**. The gaps below are mostly
    - **DHCP** starvation + rogue offers (gateway/DNS injection).
    - **LLMNR / NBT-NS / mDNS** poisoning (Responder-style name-service capture).
    - ICMP redirect, rogue router; STP root-takeover; DTP/VLAN hopping (double-tag).
-2. **Credential & secret harvesting** (passive, from cleartext + metadata):
-   - FTP/HTTP-Basic/SMTP/POP3/IMAP/SNMP/LDAP/Telnet creds, cookies, tokens,
-     NTLM/Kerberos hashes, API keys. Live "creds" feed + export.
+2. **Credential & secret harvesting** — DELIVERED (attacks/creds.py):
+   - FTP, HTTP-Basic/Digest/form, cookies, SMTP/POP3/IMAP (USER-PASS + AUTH
+     LOGIN/PLAIN), SNMP community, LDAP simple bind, Telnet login, NTLM
+     (NetNTLMv1/v2 hashes over HTTP), Kerberos AS-REQ pre-auth ($krb5pa$). Live
+     "creds" feed + export via the Creds panel / distributed sensor.
 3. **HTTP attack toolkit** — DELIVERED (attacks/http.py + http_actions.py):
    - **sslstrip / HSTS bypass**, HTTPS→HTTP downgrade, content & JS injection,
      response tampering, cookie/session manipulation, BeEF-style hook injection,
