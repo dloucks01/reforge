@@ -23,6 +23,7 @@ class Frame:
 
     data: bytes
     ingress: str = ""
+    egress: str = ""
     meta: dict = field(default_factory=dict)
 
 

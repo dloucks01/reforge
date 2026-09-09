@@ -71,6 +71,10 @@ class TlsInterceptor:
             threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
 
     def _handle(self, client: socket.socket) -> None:
+        # track every socket we open so finally can close them all — the HTTP
+        # relay only half-closes (SHUT_WR), so without this the success path
+        # leaks the client/upstream TLS sockets on every intercepted connection.
+        tls_client = up = tls_up = None
         try:
             client.settimeout(8)
             hello = client.recv(4096, socket.MSG_PEEK)
@@ -99,10 +103,13 @@ class TlsInterceptor:
                 self._relay(tls_client, tls_up)   # raw per-chunk modify hook
         except Exception:
             log.debug("TLS intercept error", exc_info=True)
-            try:
-                client.close()
-            except Exception:
-                pass
+        finally:
+            for sock in (tls_up, up, tls_client, client):
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
 
     def _relay(self, client, upstream) -> None:
         socks = [client, upstream]

