@@ -134,6 +134,11 @@ def action_summary(spec: dict) -> str:
 
 
 # --- length-change detection (for auto-arming seq/ack fix-up) ----------------
+# strip_starttls is length-preserving today (it blanks the STARTTLS advert to an
+# equal-length placeholder), so it changes no lengths. It is listed here on
+# purpose: it edits a TCP payload, and arming the seq/ack fix-up defensively costs
+# nothing while guarding against a future non-equal-length variant. Kept explicit
+# so the "why is a length-preserving action here?" question has an answer.
 _LENGTH_CHANGING_TYPES = {"strip_starttls"}
 
 

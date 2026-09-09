@@ -111,6 +111,11 @@ class NdpMitm:
         from scapy.all import get_if_hwaddr
 
         self.our_mac = get_if_hwaddr(self.iface)
+        try:                                        # our own IPv6, so traffic to us
+            from scapy.all import get_if_addr6      # isn't miscounted as relayed
+            self.our_ip = get_if_addr6(self.iface)
+        except Exception:
+            self.our_ip = None
         if self.router is None:
             self.router = default_router6(self.iface)
             if self.router:

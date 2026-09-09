@@ -12,12 +12,25 @@ from __future__ import annotations
 
 import atexit
 import datetime
+import hashlib
 import ipaddress
 import os
+import re
 import shutil
 import ssl
 import tempfile
 from pathlib import Path
+
+_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def _safe_name(host: str) -> str:
+    """A filesystem-safe base name for a per-SNI cert file: sanitized host plus a
+    short hash of the original, so path separators can't escape the temp dir and
+    distinct hosts don't collide on the same sanitized name."""
+    cleaned = _UNSAFE_NAME.sub("_", host)[:64].lstrip(".") or "host"
+    digest = hashlib.sha256(host.encode("utf-8", "replace")).hexdigest()[:8]
+    return f"{cleaned}-{digest}"
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -105,8 +118,12 @@ class DynamicCA:
         if host in self._ctx_cache:
             return self._ctx_cache[host]
         cert_pem, key_pem = self.cert_for(host)
-        cert_f = self._tmp / f"{host}.crt"
-        key_f = self._tmp / f"{host}.key"
+        # `host` is victim-supplied SNI; never build a path from it directly (a
+        # crafted SNI with path separators could escape the temp dir). Use a
+        # sanitized base plus a hash of the original so distinct hosts don't collide.
+        base = _safe_name(host)
+        cert_f = self._tmp / f"{base}.crt"
+        key_f = self._tmp / f"{base}.key"
         cert_f.write_bytes(cert_pem)
         key_f.write_bytes(key_pem)
         try:

