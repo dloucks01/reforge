@@ -788,8 +788,9 @@ class MainWindow(QMainWindow):
         self.engagement.log("proxy-intent", "message-level rules inline: " + ", ".join(types))
         return ("⚠ rule(s) rewrite whole HTTP messages (" + names + ") — the inline "
                 "per-segment engine only sees one segment, so a multi-segment body is "
-                "missed. For reliable whole-body rewriting use Attacks → TCP proxy "
-                "(message relay) with the same transform(s).")
+                "missed or corrupted (the edit lands in the wrong place, depending on "
+                "where TCP split). For reliable whole-body rewriting use Attacks → TCP "
+                "proxy (message relay) with the same transform(s).")
 
     def _inline_warnings(self, ifaces: list | None = None) -> str:
         """Combined pre-arm guidance: host preflight blockers + message-proxy intent."""
