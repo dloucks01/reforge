@@ -49,10 +49,27 @@ def _layers(pkt):
     return out
 
 
+def _clear_autofields(pkt) -> None:
+    for lyr in _layers(pkt):
+        for auto in ("len", "chksum", "plen", "ulen"):
+            if hasattr(lyr, auto):
+                try:
+                    delattr(lyr, auto)
+                except Exception:
+                    pass
+
+
 class Mutator:
     name = "mutator"
 
     def mutate(self, data: bytes, rng: random.Random, link: str = "ether") -> bytes:
+        """Return mutated bytes (back-compat convenience over mutate_annotated)."""
+        return self.mutate_annotated(data, rng, link)[0]
+
+    def mutate_annotated(self, data: bytes, rng: random.Random,
+                         link: str = "ether") -> tuple[bytes, dict]:
+        """Return (mutated bytes, metadata). Metadata may carry {"field": "Layer.name"}
+        so a campaign can track per-field coverage."""
         raise NotImplementedError
 
 
@@ -62,15 +79,15 @@ class ByteMutator(Mutator):
     def __init__(self, mutations: int = 4):
         self.mutations = mutations
 
-    def mutate(self, data: bytes, rng: random.Random, link: str = "ether") -> bytes:
+    def mutate_annotated(self, data, rng, link="ether"):
         # reproducible: derive a sub-seed from the campaign rng
-        return _byte_mutate(data, self.mutations, seed=rng.randrange(2**31))
+        return _byte_mutate(data, self.mutations, seed=rng.randrange(2**31)), {}
 
 
 class FieldAwareMutator(Mutator):
     name = "field"
 
-    def mutate(self, data: bytes, rng: random.Random, link: str = "ether") -> bytes:
+    def mutate_annotated(self, data, rng, link="ether"):
         try:
             pkt = _dissect(data, link)
             layers = _layers(pkt)
@@ -80,30 +97,23 @@ class FieldAwareMutator(Mutator):
                 for f in layer.fields_desc:
                     candidates.append((layer, f.name))
             if not candidates:
-                return data
+                return data, {}
             layer, fname = rng.choice(candidates)
             cur = layer.getfieldval(fname)
             if isinstance(cur, int):
                 setattr(layer, fname, rng.choice(INT_BOUNDARIES))
             else:
                 setattr(layer, fname, rng.choice(BAD_STRINGS))
-            # recompute lengths/checksums
-            for lyr in _layers(pkt):
-                for auto in ("len", "chksum", "plen", "ulen"):
-                    if hasattr(lyr, auto):
-                        try:
-                            delattr(lyr, auto)
-                        except Exception:
-                            pass
-            return bytes(pkt)
+            _clear_autofields(pkt)              # recompute lengths/checksums
+            return bytes(pkt), {"field": f"{layer.__class__.__name__}.{fname}"}
         except Exception:
-            return _byte_mutate(data, 2, seed=rng.randrange(2**31))
+            return _byte_mutate(data, 2, seed=rng.randrange(2**31)), {}
 
 
 class DictionaryMutator(Mutator):
     name = "dict"
 
-    def mutate(self, data: bytes, rng: random.Random, link: str = "ether") -> bytes:
+    def mutate_annotated(self, data, rng, link="ether"):
         from scapy.packet import Raw
 
         token = rng.choice(BAD_STRINGS)
@@ -113,24 +123,18 @@ class DictionaryMutator(Mutator):
                 load = bytes(pkt[Raw].load)
                 pos = rng.randrange(len(load) + 1) if load else 0
                 pkt[Raw].load = load[:pos] + token + load[pos:]
-                for lyr in _layers(pkt):
-                    for auto in ("len", "chksum", "plen", "ulen"):
-                        if hasattr(lyr, auto):
-                            try:
-                                delattr(lyr, auto)
-                            except Exception:
-                                pass
-                return bytes(pkt)
+                _clear_autofields(pkt)
+                return bytes(pkt), {"field": "Raw.load"}
         except Exception:
             pass
         # no payload layer: append the token
-        return data + token
+        return data + token, {"field": "Raw.load"}
 
 
 class StructureAwareMutator(Mutator):
     name = "struct"
 
-    def mutate(self, data: bytes, rng: random.Random, link: str = "ether") -> bytes:
+    def mutate_annotated(self, data, rng, link="ether"):
         try:
             pkt = _dissect(data, link)
             # find a length-like field and set it wrong WITHOUT recomputing (desync)
@@ -138,10 +142,11 @@ class StructureAwareMutator(Mutator):
                 for f in layer.fields_desc:
                     if "len" in f.name.lower() and isinstance(layer.getfieldval(f.name), int):
                         setattr(layer, f.name, rng.choice([0, 1, 0xFFFF, 0xFFFFFFFF]))
-                        return bytes(pkt)   # do NOT clear it — keep the lie
+                        # do NOT clear it — keep the length lie
+                        return bytes(pkt), {"field": f"{layer.__class__.__name__}.{f.name}"}
         except Exception:
             pass
-        return _byte_mutate(data, 1, seed=rng.randrange(2**31))
+        return _byte_mutate(data, 1, seed=rng.randrange(2**31)), {}
 
 
 DEFAULT_STRATEGIES = [ByteMutator(), FieldAwareMutator(), DictionaryMutator(),

@@ -78,3 +78,31 @@ def test_scan_port_preset_index_zero_is_noop(app):
     before = p.ports.text()
     p._apply_port_preset(0)                             # the "Ports…" header
     assert p.ports.text() == before
+
+
+def test_save_results_before_run_prompts(app):
+    p = _fpanel(app)
+    p.save_results()
+    assert "Run a campaign first" in p.status.text()
+
+
+def test_save_results_writes_files(app, tmp_path, monkeypatch):
+    # simulate a completed campaign, then save without opening a dialog
+    from scapy.layers.inet import IP, UDP
+    from scapy.layers.l2 import Ether
+
+    from reforge.fuzzing import monitor as mon
+    from reforge.fuzzing.campaign import FuzzCampaign, load_findings
+
+    seed = bytes(Ether() / IP() / UDP(dport=53) / b"HELLO")
+    p = _fpanel(app, builder_bytes=seed)
+    camp = FuzzCampaign(seed, lambda d: mon.Response(reply=None), iterations=10, seed=1)
+    p._campaign = camp
+    p._report = camp.run()
+
+    monkeypatch.setattr("reforge.gui.fuzzing_panel.QFileDialog.getExistingDirectory",
+                        staticmethod(lambda *a, **k: str(tmp_path)))
+    p.save_results()
+    assert (tmp_path / "corpus.json").exists() and (tmp_path / "findings.json").exists()
+    assert "Saved corpus" in p.status.text()
+    assert len(load_findings(tmp_path)) == len(p._report.findings)

@@ -72,10 +72,15 @@ class FuzzingPanel(QWidget):
         self.iters = QSpinBox(); self.iters.setRange(1, 1000000); self.iters.setValue(200)
         self.iface = QComboBox(); self.iface.addItems(list_interfaces() or ["<none>"])
         self.timeout = QSpinBox(); self.timeout.setRange(1, 30); self.timeout.setValue(2)
+        self.rate = QSpinBox(); self.rate.setRange(0, 100000); self.rate.setValue(0)
+        self.rate.setToolTip("Cases per second (0 = unlimited)")
         self.preview_btn = QPushButton("Preview variants"); self.preview_btn.clicked.connect(self.preview)
         self.run_btn = QPushButton("Run live campaign"); self.run_btn.clicked.connect(self.run_campaign)
+        self.save_btn = QPushButton("Save results"); self.save_btn.clicked.connect(self.save_results)
+        self.save_btn.setEnabled(False)
         for w in (QLabel("Iterations:"), self.iters, QLabel("Iface:"), self.iface,
-                  QLabel("Timeout(s):"), self.timeout, self.preview_btn, self.run_btn):
+                  QLabel("Timeout(s):"), self.timeout, QLabel("Rate/s:"), self.rate,
+                  self.preview_btn, self.run_btn, self.save_btn):
             crow.addWidget(w)
         crow.addStretch(1)
         root.addLayout(crow)
@@ -169,7 +174,8 @@ class FuzzingPanel(QWidget):
             return mon.Response(reply=reply, latency=time.monotonic() - t)
 
         camp = FuzzCampaign(self._seed, send_receive, strategies=strategies,
-                            iterations=iters, extra_seeds=self._extra_seeds)
+                            iterations=iters, extra_seeds=self._extra_seeds,
+                            rate=float(self.rate.value()))
         self._report = None
         self._campaign = camp
 
@@ -189,4 +195,17 @@ class FuzzingPanel(QWidget):
         self.run_btn.setEnabled(True)
         if self._report is not None:
             self.view.setPlainText(self._report.summary())
+            self.save_btn.setEnabled(True)
             self.status.setText(f"Campaign done — {len(self._report.findings)} finding(s).")
+
+    # ---- persistence --------------------------------------------------------
+    def save_results(self) -> None:
+        """Save the current campaign's corpus + findings for replay/triage."""
+        if not getattr(self, "_campaign", None) or self._report is None:
+            self.status.setText("Run a campaign first.")
+            return
+        directory = QFileDialog.getExistingDirectory(self, "Save fuzzing results")
+        if not directory:
+            return
+        self._campaign.save(directory)
+        self.status.setText(f"Saved corpus + {len(self._report.findings)} finding(s) to {directory}.")
