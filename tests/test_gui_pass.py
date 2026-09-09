@@ -99,3 +99,68 @@ def test_drain_throttles_heavy_refreshes(app, monkeypatch):
     assert health["n"] == 2
     assert recon["n"] == 2
     assert win._SLOW_TICK_EVERY == 5
+
+
+# ---- layout pass: attack scroll, intercept collapse, live split, status -----
+def test_attacks_panel_sections_in_scrollarea(app):
+    from PySide6.QtWidgets import QScrollArea
+    from reforge.gui.attacks_panel import AttacksPanel
+    p = AttacksPanel()
+    # the seven sections live inside a resizable scroll area (no more clipping)
+    scrolls = p.findChildren(QScrollArea)
+    assert scrolls and scrolls[0].widgetResizable()
+    # the scroll content hosts the seven group boxes
+    from PySide6.QtWidgets import QGroupBox
+    assert len(scrolls[0].widget().findChildren(QGroupBox)) == 7
+
+
+def test_intercept_apparatus_collapses_when_off(app):
+    from reforge.gui.intercept_panel import InterceptPanel
+    p = InterceptPanel()
+    # off + nothing held -> apparatus hidden, hint shown
+    assert p._body_split.isHidden() and not p._collapsed_hint.isHidden()
+
+    # enabling intercept expands it
+    p.enable_check.setChecked(True)          # toggled -> _apply_filter -> _sync_body
+    assert not p._body_split.isHidden() and p._collapsed_hint.isHidden()
+
+    # disabling collapses again
+    p.enable_check.setChecked(False)
+    assert p._body_split.isHidden()
+
+
+def test_intercept_expands_on_held_rows_even_when_off(app):
+    from reforge.gui.intercept_panel import InterceptPanel
+    p = InterceptPanel()
+    assert p._body_split.isHidden()
+    p.table.insertRow(0)                     # a rule-fed HOLD populated the queue
+    p._sync_body()
+    assert not p._body_split.isHidden()      # visible despite the checkbox being off
+
+
+def test_live_split_follows_intercept_arm(app, monkeypatch):
+    win = _win(app)
+    calls = []
+    monkeypatch.setattr(win, "_set_live_split", lambda armed: calls.append(armed))
+    from reforge.rules.matchers import AllMatch
+    win.engine = win.rules_panel.build_engine(dry_run=False)
+    win._on_intercept_filter(AllMatch(), "all")
+    win._on_intercept_filter(None, "")
+    assert calls == [True, False]            # armed -> editor room, off -> stream room
+    assert win._LIVE_SPLIT_IDLE[0] > win._LIVE_SPLIT_IDLE[1]   # idle favors the stream
+
+
+def test_status_pill_omits_packet_count(app):
+    win = _win(app)
+
+    class _PassiveService:
+        running = True
+
+        def drain(self):
+            return []
+
+    win.service = _PassiveService()
+    win.packets.extend([(0.0, None)] * 5)
+    win._refresh_status_pill()
+    text = win.status_pill.text()
+    assert "read-only" in text and "pkts" not in text and "5" not in text

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -76,14 +78,23 @@ class AttacksPanel(QWidget):
         note = QLabel("Active on-path attacks — authorized engagements only. Needs root.")
         note.setStyleSheet("color: palette(mid);")
         root.addWidget(note)
-        root.addWidget(self._arp_box())
-        root.addWidget(self._dns_box())
-        root.addWidget(self._name_box())
-        root.addWidget(self._dhcp_box())
-        root.addWidget(self._ndp_box())
-        root.addWidget(self._tls_box())
-        root.addWidget(self._tcpproxy_box())
-        root.addStretch(1)
+
+        # The seven attack sections don't fit at typical heights. Host them in a
+        # scroll area so they keep their natural size and the panel scrolls,
+        # instead of Qt crushing sections below their minimum and overlapping them.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        content = QWidget()
+        inner = QVBoxLayout(content)
+        inner.setContentsMargins(0, 0, 0, 0)
+        for box in (self._arp_box(), self._dns_box(), self._name_box(),
+                    self._dhcp_box(), self._ndp_box(), self._tls_box(),
+                    self._tcpproxy_box()):
+            inner.addWidget(box)
+        inner.addStretch(1)
+        scroll.setWidget(content)
+        root.addWidget(scroll, 1)
 
         # Live "what landed" poll: a sniff-based attack that sends but never sees
         # a query looks identical to a working one. Surface seen-vs-acted so a

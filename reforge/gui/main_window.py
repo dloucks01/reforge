@@ -467,8 +467,21 @@ class MainWindow(QMainWindow):
         outer = QSplitter(Qt.Vertical)
         outer.addWidget(self._live_top)
         outer.addWidget(lower)
-        outer.setSizes([260, 560])
+        # Capture-first default: the packet stream gets the room; the Intercept
+        # apparatus below is collapsed until armed (it grows via _set_live_split).
+        outer.setSizes([600, 260])
+        self._live_outer = outer
         return self._ws("live", outer)
+
+    # split presets for the Live workspace: stream-heavy when just capturing,
+    # editor-heavy once interception is armed
+    _LIVE_SPLIT_IDLE = [600, 260]
+    _LIVE_SPLIT_ARMED = [340, 520]
+
+    def _set_live_split(self, armed: bool) -> None:
+        outer = getattr(self, "_live_outer", None)
+        if outer is not None:
+            outer.setSizes(self._LIVE_SPLIT_ARMED if armed else self._LIVE_SPLIT_IDLE)
 
     def _refresh_flows(self) -> None:
         if not hasattr(self, "flows_table"):
@@ -697,6 +710,7 @@ class MainWindow(QMainWindow):
             self._intercept_filter = None
         else:
             self._intercept_filter = (match, text)
+        self._set_live_split(match is not None)   # give the editor room once armed
         if self.engine is not None:
             self._install_intercept_filter(self.engine)
             n = self.intercept.count() if self.intercept else 0
@@ -1097,7 +1111,9 @@ class MainWindow(QMainWindow):
             inline = hasattr(self.service, "armed")
             held = self.intercept.count() if self.intercept is not None else 0
             if not inline:
-                pill.setText(f"● Capturing · {len(self.packets)} pkts · read-only")
+                # the pill states the MODE (what editing does); the live packet /
+                # loss count lives in the bottom status bar, so they don't duplicate
+                pill.setText("● Capturing · read-only")
                 pill.setProperty("state", "capturing")
             else:
                 armed = bool(getattr(self.service, "armed", False))

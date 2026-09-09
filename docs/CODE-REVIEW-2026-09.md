@@ -265,10 +265,18 @@ suite grew from 609 to 649 passing.
   tick; the heavy refreshes (held-packet re-dissect, health meter, recon
   inventory, flows table) run at 1/5 that rate (_SLOW_TICK_EVERY).
 
+**GUI pass — layout (done)**
+
+- Attack panel clipping fixed (sections hosted in a scroll area).
+- Live workspace favors the packet stream by default and grows the editor only
+  once interception is armed; the Intercept apparatus collapses to a hint when off.
+- Session-bar pill states the mode; the live packet/loss count stays in the
+  bottom status bar (no more duplication).
+
 **GUI pass — remaining**
 
-- Layout work (deferred to the end of the GUI pass, per the maintainer).
 - _dry_run_over_capture still iterates the whole capture synchronously on click.
+- The no-helper (root GUI) nft fallback still applies synchronously (see §3.8).
 
 **Not yet addressed** (lower priority / larger)
 
