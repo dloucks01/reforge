@@ -856,78 +856,139 @@ class MainWindow(QMainWindow):
         except Exception:
             return None
 
+    def _inline_submit(self, fn) -> None:
+        """Run privileged inline work off the UI thread, serialized in submission
+        order. A stop's teardown always completes before a following start's
+        install/bind (the rebind invariant), and the Qt event loop never blocks on
+        nft subprocesses or the runner-thread join.
+
+        The worker thread runs the queued ops FIFO then EXITS when the queue
+        drains; a later submit starts a fresh one. A persistent blocked thread
+        would otherwise linger for the app's lifetime and, multiplied across the
+        windows a test suite creates, add GIL contention to every later operation.
+        """
+        import threading
+
+        if getattr(self, "_inline_lock", None) is None:
+            self._inline_lock = threading.Lock()
+            self._inline_ops = []
+            self._inline_running = False
+
+        with self._inline_lock:
+            self._inline_ops.append(fn)
+            if self._inline_running:
+                return                          # the running worker will pick it up
+            self._inline_running = True
+
+        def _drain():
+            while True:
+                with self._inline_lock:
+                    if not self._inline_ops:
+                        self._inline_running = False
+                        return                  # idle -> exit; next submit restarts us
+                    op = self._inline_ops.pop(0)
+                try:
+                    op()
+                except Exception:
+                    log.exception("inline op failed")
+                op = None                       # don't pin a self-capturing op
+
+        threading.Thread(target=_drain, name="reforge-inline-ops", daemon=True).start()
+
+    def _inline_flush(self, timeout: float = 6.0) -> None:
+        """Block until queued inline ops drain (for shutdown and tests)."""
+        import time as _t
+        if getattr(self, "_inline_lock", None) is None:
+            return
+        end = _t.monotonic() + timeout
+        while _t.monotonic() < end:
+            with self._inline_lock:
+                if not self._inline_running and not self._inline_ops:
+                    return
+            _t.sleep(0.005)
+
     def _start_inline(self, iface: str, victims: list) -> str:
         """Divert a MITM'd victim's forwarded traffic into the rule engine +
         interactive intercept via NFQUEUE. Returns a status string."""
-        import threading
-
-        from reforge.capture.nfqueue import NfqueueRunner, nft_forward_queue_rules
-
         warn = self._inline_warnings()              # preflight + message-proxy intent
-        self._stop_inline()
+        self._stop_inline()                         # queued teardown of any previous
         engine = self.rules_panel.build_engine(dry_run=False)
         self.engine = engine
         self._install_intercept_filter(engine)      # the Intercept-tab filter applies here too
         queue = self._shared_intercept_queue()
         self.intercept_panel.set_transform_count(len(self._transforms))
-
-        # Install the NFQUEUE diversion rules. Prefer the privileged helper (one
-        # IPC call runs the whole batch and keeps its own teardown); otherwise fall
-        # back to running the commands here.
-        helper = self._helper()
-        if helper is not None:
-            helper.queue_install(1, victims or None)
-            self._nfq_via_helper = True
-            self._nfq_remove = []
-        else:
-            import subprocess
-            install, self._nfq_remove = nft_forward_queue_rules(1, victims or None)
-            self._nfq_via_helper = False
-            for cmd in install:
-                subprocess.run(cmd, capture_output=True, check=False)
         seq_fixer = None
         if self._auto_arm_seqfix():          # keep flows in sync on length-changing edits
             from reforge.core.flowrewrite import FlowRewriter
             seq_fixer = FlowRewriter()
-        self._nfq_runner = NfqueueRunner(engine, queue_num=1, intercept=queue,
-                                         seq_fixer=seq_fixer)
-        self._nfq_thread = threading.Thread(target=self._nfq_runner.run, daemon=True)
-        self._nfq_thread.start()
-        self.engagement.log("mitm-inline", "NFQUEUE victims: " + ", ".join(victims or []))
+        helper = self._helper()
+        victim_list = list(victims or [])
+
+        # The privileged work (nft install + binding the runner thread) runs on the
+        # inline worker, after any queued teardown, so the UI thread returns at once.
+        def _do_start():
+            from reforge.capture.nfqueue import NfqueueRunner, nft_forward_queue_rules
+            if helper is not None:
+                helper.queue_install(1, victim_list or None)   # one IPC batch
+                self._nfq_via_helper = True
+                self._nfq_remove = []
+            else:
+                import subprocess
+                install, self._nfq_remove = nft_forward_queue_rules(1, victim_list or None)
+                self._nfq_via_helper = False
+                for cmd in install:
+                    subprocess.run(cmd, capture_output=True, check=False)
+            runner = NfqueueRunner(engine, queue_num=1, intercept=queue, seq_fixer=seq_fixer)
+            self._nfq_runner = runner
+            import threading
+            self._nfq_thread = threading.Thread(target=runner.run, daemon=True)
+            self._nfq_thread.start()
+
+        self._inline_submit(_do_start)
+        self.engagement.log("mitm-inline", "NFQUEUE victims: " + ", ".join(victim_list))
         base = ("Inline manipulation ON — victim traffic flows through the Intercept tab. "
                 "Set a filter to hold, or add rules.")
         self.statusBar().showMessage(f"{warn}   {base}" if warn else base)
         return "inline via NFQUEUE" + (f"  [{warn}]" if warn else "")
 
     def _stop_inline(self) -> None:
-        runner = getattr(self, "_nfq_runner", None)
-        if runner is not None:
-            try:
-                runner.stop()
-            except Exception:
-                pass
-            self._nfq_runner = None
-        # wait for the runner loop to unbind the kernel queue before returning,
-        # so a quick restart (_start_inline calls _stop_inline first) can rebind
-        # the same queue number instead of failing with "Failed to create queue".
-        thread = getattr(self, "_nfq_thread", None)
-        if thread is not None:
-            thread.join(timeout=3.0)
-            self._nfq_thread = None
-        # remove the diversion rules the same way they were installed
-        if getattr(self, "_nfq_via_helper", False):
-            helper = self._helper()
-            if helper is not None:
+        """Queue teardown of the inline runner + its nft rules on the worker, so
+        the UI never blocks on the runner-thread join or the nft removal."""
+        if getattr(self, "_inline_lock", None) is None:
+            return                              # inline never started — nothing to tear down
+
+        def _do_stop():
+            runner = getattr(self, "_nfq_runner", None)
+            if runner is not None:
                 try:
-                    helper.queue_remove()
+                    runner.stop()
                 except Exception:
-                    log.debug("helper queue_remove failed", exc_info=True)
-            self._nfq_via_helper = False
-        else:
-            import subprocess
-            for cmd in getattr(self, "_nfq_remove", []):
-                subprocess.run(cmd, capture_output=True, check=False)
-        self._nfq_remove = []
+                    pass
+                self._nfq_runner = None
+            # wait for the runner loop to unbind the kernel queue before returning,
+            # so a following start can rebind the same queue number instead of
+            # failing with "Failed to create queue" (this join is why teardown is
+            # serialized ahead of any queued start).
+            thread = getattr(self, "_nfq_thread", None)
+            if thread is not None:
+                thread.join(timeout=3.0)
+                self._nfq_thread = None
+            # remove the diversion rules the same way they were installed
+            if getattr(self, "_nfq_via_helper", False):
+                helper = self._helper()
+                if helper is not None:
+                    try:
+                        helper.queue_remove()
+                    except Exception:
+                        log.debug("helper queue_remove failed", exc_info=True)
+                self._nfq_via_helper = False
+            else:
+                import subprocess
+                for cmd in getattr(self, "_nfq_remove", []):
+                    subprocess.run(cmd, capture_output=True, check=False)
+            self._nfq_remove = []
+
+        self._inline_submit(_do_stop)
 
     def _snapshot_engagement(self) -> None:
         try:
@@ -1210,6 +1271,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Exported {n} packets -> {path}")
 
     # ---- rules / dry-run ----------------------------------------------------
+    _DRY_RUN_CHUNK = 2000
+
     def _dry_run_over_capture(self) -> None:
         if not self.packets:
             self.statusBar().showMessage("No packets — capture or open a pcap first")
@@ -1217,21 +1280,55 @@ class MainWindow(QMainWindow):
         if not self.rules_panel.specs:
             self.statusBar().showMessage("No rules defined — add a rule first")
             return
+        # Evaluate the engine over the capture in chunks, yielding to the event
+        # loop between slices, so a large capture doesn't freeze the UI on click.
+        # A snapshot keeps the run stable if capture is still appending rows.
+        packets = list(self.packets)
         engine = self.rules_panel.build_engine(dry_run=True)
-        matched: list[int] = []
-        for idx, (_ts, frame) in enumerate(self.packets):
+        state = {"i": 0, "matched": [], "packets": packets, "engine": engine}
+        self._dry_run = state
+        self._dry_run_step()
+
+    def _dry_run_step(self) -> None:
+        """Process one chunk, then either schedule the next (yielding to the event
+        loop) or finish."""
+        if self._dry_run_chunk_once():
+            self._dry_run_finish()
+        elif self._dry_run is not None:
+            QTimer.singleShot(0, self._dry_run_step)
+
+    def _dry_run_chunk_once(self) -> bool:
+        """Evaluate one slice of the capture; return True when all packets are
+        scanned. Kept free of any timer so it can be driven synchronously."""
+        state = getattr(self, "_dry_run", None)
+        if state is None:
+            return True
+        packets, engine = state["packets"], state["engine"]
+        end = min(state["i"] + self._DRY_RUN_CHUNK, len(packets))
+        for idx in range(state["i"], end):
+            _ts, frame = packets[idx]
             try:
                 verdict = engine.evaluate(Packet.from_bytes(frame.data, link="ether"))
             except Exception:
                 continue
             if verdict.matched_rule:
-                matched.append(idx)
+                state["matched"].append(idx)
+        state["i"] = end
+        if len(packets) > self._DRY_RUN_CHUNK:      # progress feedback on long runs
+            self.statusBar().showMessage(
+                f"Dry-run (shadow): scanned {end} of {len(packets)} packets…")
+        return end >= len(packets)
+
+    def _dry_run_finish(self) -> None:
+        state = self._dry_run
+        self._dry_run = None
+        engine, packets, matched = state["engine"], state["packets"], state["matched"]
         hits = {r.name: r.hits for r in engine.rules}
         self.rules_panel.refresh(hits)
         self._mark_rows(set(matched))
         active = sum(1 for v in hits.values() if v)
         self.statusBar().showMessage(
-            f"Dry-run (shadow): {len(matched)} of {len(self.packets)} packets matched "
+            f"Dry-run (shadow): {len(matched)} of {len(packets)} packets matched "
             f"by {active} rule(s) — no traffic altered"
         )
 
@@ -1336,6 +1433,7 @@ class MainWindow(QMainWindow):
         self._save_settings()                 # remember last-used inputs
         self._save_layout()                   # remember the pane split + workspaces
         self._stop_inline()
+        self._inline_flush()                  # let queued teardown (nft removal) finish
         self.stop_capture()
         self._snapshot_engagement()
         try:
