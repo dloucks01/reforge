@@ -73,9 +73,12 @@ assert only some fields did not catch.
 6. **NDP "RA flooding" is a single rogue RA**; `ndp.RogueRouter` is dead code.
    No ICMP-redirect / STP / DTP / VLAN-hopping (Tier-1 design list).
 7. **DNS spoofing is A-record only** (§3.4) — no AAAA/other qtype.
-8. **Custom-dissector capability is a plumbing shell** — `dissect/base.py` is
-   interface + empty registry; no built-in custom dissectors ship (Scapy does
-   the real dissection). Crafting's `custom_proto.py` is the real surface.
+8. **Custom-dissector capability** — RESOLVED. A library of built-in ICS/OT
+   dissectors now ships (`dissect/builtins.py`: Modbus/TCP, DNP3, BACnet/IP,
+   IEC-104, EtherNet/IP, TPKT). Each declarative spec registers both a Scapy
+   layer (bound to its port(s), so the tree view / field rules / builder see it)
+   and a `SpecDissector` in the `dissect` registry (no longer empty), and they
+   load at CLI/GUI startup.
 9. **Covert channels have no GUI panel** — full backend (`covert/`), reachable
    only as a scenario step.
 
@@ -322,5 +325,13 @@ suite grew from 609 to 649 passing.
 
 **Still open** (larger, separate efforts)
 
-- §2.8 built-in custom dissectors; the AF_XDP/PF_RING/DPDK compiled zero-copy
-  loop. (Wireless (802.11) is on indefinite hold — CAPABILITY-GAPS item 10.)
+- The AF_XDP/PF_RING/DPDK compiled zero-copy loop (a native/eBPF per-deployment
+  component). (Wireless (802.11) is on indefinite hold — CAPABILITY-GAPS item 10.)
+
+**Built-in custom dissectors — done (§2.8)**
+
+- `reforge/dissect/builtins.py` ships Modbus/TCP, DNP3, BACnet/IP, IEC-104,
+  EtherNet/IP, and TPKT as declarative specs. Each becomes a port-bound Scapy
+  layer (tree view / field rules / builder) and a `SpecDissector` with an
+  offset-accurate editable layout in the `dissect` registry, loaded at startup.
+  `custom_proto.define_protocol` gained both-direction port binding.

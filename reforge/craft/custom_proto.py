@@ -78,12 +78,20 @@ def define_protocol(spec: dict, register: bool = True):
                 "UDP": ("scapy.layers.inet", "UDP")}.get(bind.get("over", "UDP"))
         if over:
             base = getattr(__import__(over[0], fromlist=[over[1]]), over[1])
-            key = {}
-            if "dport" in bind:
-                key["dport"] = int(bind["dport"])
-            if "sport" in bind:
-                key["sport"] = int(bind["sport"])
-            bind_layers(base, cls, **key)
+            if bind.get("ports"):
+                # bind each port on BOTH directions so requests and responses
+                # both dissect (a single {dport,sport} key would require both).
+                for p in bind["ports"]:
+                    bind_layers(base, cls, dport=int(p))
+                    bind_layers(base, cls, sport=int(p))
+            else:
+                key = {}
+                if "dport" in bind:
+                    key["dport"] = int(bind["dport"])
+                if "sport" in bind:
+                    key["sport"] = int(bind["sport"])
+                if key:
+                    bind_layers(base, cls, **key)
 
     if register:
         builder.register_custom(name, cls)
