@@ -100,7 +100,7 @@ def run_selftest() -> SelfTestReport:
 
     req = b"POST / HTTP/1.1\r\nHost: t\r\nContent-Length: 10\r\n\r\nuser=admin"
     framer = HttpFramer()
-    framed = [m for m in framer.feed(req)]
+    framed = list(framer.feed(req))
     frame_ok = len(framed) == 1 and framed[0] == req
     steps.append(SelfTestStep("HTTP message framed", frame_ok, f"{len(framed)} message(s)"))
 

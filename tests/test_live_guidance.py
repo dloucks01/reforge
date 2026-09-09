@@ -73,8 +73,8 @@ def test_per_segment_http_inject_mishandles_multisegment_body_live():
     from reforge.attacks.http_actions import InjectHtml
     from reforge.core.bridge import UserspaceBridge
     from reforge.rules.base import Rule
-    from reforge.rules.matchers import AllMatch
     from reforge.rules.engine import RuleEngine
+    from reforge.rules.matchers import AllMatch
 
     server = bridge = None
     with BridgeFlowLab() as lab:

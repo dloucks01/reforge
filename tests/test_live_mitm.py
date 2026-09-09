@@ -197,7 +197,7 @@ def test_arp_mitm_poisons_multiple_victims_at_once():
     with SegmentLab() as net:
         atk_mac = _attacker_mac()
         victims = [net["victim_ip4"], net["victim2_ip4"]]
-        for vns, vip in (("rf-victim", net["victim_ip4"]), ("rf-victim2", net["victim2_ip4"])):
+        for vns, _vip in (("rf-victim", net["victim_ip4"]), ("rf-victim2", net["victim2_ip4"])):
             netns_exec(vns, "ping", "-c", "1", "-W", "1", net["gateway_ip4"], check=False)
             assert _gw_mac_in(vns, "-4", net["gateway_ip4"]) not in (None, atk_mac)
 

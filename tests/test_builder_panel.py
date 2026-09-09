@@ -24,10 +24,10 @@ def test_add_remove_and_clear_layers(app):
     p = _panel(app)
     p.layer_combo.setCurrentText("Ether"); p._add_layer()
     p.layer_combo.setCurrentText("IP"); p._add_layer()
-    assert [l["layer"] for l in p.layers] == ["Ether", "IP"]
+    assert [ly["layer"] for ly in p.layers] == ["Ether", "IP"]
     assert p.stack.count() == 2
     p.stack.setCurrentRow(1); p._remove_layer()
-    assert [l["layer"] for l in p.layers] == ["Ether"]
+    assert [ly["layer"] for ly in p.layers] == ["Ether"]
     p._clear()
     assert p.layers == [] and p.stack.count() == 0
 
@@ -38,7 +38,7 @@ def test_move_reorders_layers(app):
         p.layer_combo.setCurrentText(layer); p._add_layer()
     p.stack.setCurrentRow(2)
     p._move(-1)                                   # TCP up one
-    assert [l["layer"] for l in p.layers] == ["Ether", "TCP", "IP"]
+    assert [ly["layer"] for ly in p.layers] == ["Ether", "TCP", "IP"]
 
 
 def test_field_edit_reflected_in_bytes(app):
@@ -61,7 +61,7 @@ def test_load_bytes_roundtrips_into_layers(app):
     raw = bytes(Ether() / IP(dst="10.1.2.3") / UDP(dport=53))
     p = _panel(app)
     p.load_bytes(raw)
-    names = [l["layer"] for l in p.layers]
+    names = [ly["layer"] for ly in p.layers]
     assert names[:3] == ["Ether", "IP", "UDP"]
     # and it rebuilds to a packet addressed the same way
     out = p._current_bytes()

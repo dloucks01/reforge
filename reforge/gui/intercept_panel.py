@@ -583,7 +583,7 @@ class InterceptPanel(QWidget):
         if mb is None:
             self._mod_label.setText("Modified \u2014 editable")
             return
-        changed = sum(1 for a, b in zip(self._orig_bytes, mb) if a != b)
+        changed = sum(1 for a, b in zip(self._orig_bytes, mb, strict=False) if a != b)
         changed += abs(len(mb) - len(self._orig_bytes))
         self._mod_label.setText(
             f"Modified \u2014 editable   \u00b7  {changed} byte{'s' if changed != 1 else ''} changed"
@@ -710,7 +710,7 @@ class InterceptPanel(QWidget):
                 return " \u2014 " + describe_actions(acts)
         except Exception:
             pass
-        n = sum(1 for a, b in zip(orig, work) if a != b) + abs(len(work) - len(orig))
+        n = sum(1 for a, b in zip(orig, work, strict=False) if a != b) + abs(len(work) - len(orig))
         return f" \u2014 {n} byte(s) changed" if n else ""
 
     def _show_result(self, action: str, pid: int, orig: bytes, work: bytes) -> None:
@@ -745,7 +745,7 @@ class InterceptPanel(QWidget):
         sent_bytes = None if action == "drop" else (work if action == "modify" else orig)
         delta = ""
         if action == "modify":
-            n = sum(1 for a, b in zip(orig, work) if a != b) + abs(len(work) - len(orig))
+            n = sum(1 for a, b in zip(orig, work, strict=False) if a != b) + abs(len(work) - len(orig))
             delta = str(n)
         colors = {"drop": "#ff5c6c", "modify": "#4d9fff", "forward": "#3ddc97"}
         info = self._short_info(sent_bytes if sent_bytes is not None else orig)

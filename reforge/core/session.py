@@ -47,7 +47,7 @@ class Session:
         return target
 
     @classmethod
-    def load(cls, path: Path, passphrase: str | None = None) -> "Session":
+    def load(cls, path: Path, passphrase: str | None = None) -> Session:
         raw = Path(path).read_bytes()
         from reforge.core.vault import decrypt_bytes, is_encrypted
 

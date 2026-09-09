@@ -23,9 +23,9 @@ import base64
 import json
 import random
 import time
-from dataclasses import asdict, dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 from reforge.fuzzing import monitor as mon
 from reforge.fuzzing.strategies import DEFAULT_STRATEGIES, FuzzCase, Mutator
@@ -71,7 +71,7 @@ class FuzzCampaign:
                  extra_seeds: list[bytes] | None = None,
                  prefix: list[bytes] | Callable[[random.Random], list[bytes]] | None = None,
                  rate: float = 0.0, max_seconds: float | None = None):
-        self.corpus: list[bytes] = [seed_bytes] + list(extra_seeds or [])
+        self.corpus: list[bytes] = [seed_bytes, *list(extra_seeds or [])]
         self.send_receive = send_receive
         self.strategies = strategies or DEFAULT_STRATEGIES
         self.monitor = monitor or mon.TargetMonitor()

@@ -112,7 +112,7 @@ class NdpMitm:
 
         self.our_mac = get_if_hwaddr(self.iface)
         try:                                        # our own IPv6, so traffic to us
-            from scapy.all import get_if_addr6      # isn't miscounted as relayed
+            from scapy.all import get_if_addr6  # isn't miscounted as relayed
             self.our_ip = get_if_addr6(self.iface)
         except Exception:
             self.our_ip = None
@@ -195,7 +195,7 @@ class NdpMitm:
         while self._running.is_set():
             batch = self.poison_batch()
             if self.rogue_ra and self.our_mac:
-                batch = batch + [build_ra(self.our_mac)]
+                batch = [*batch, build_ra(self.our_mac)]
             if batch:
                 sendp(batch, iface=self.iface, verbose=False)
                 self.sent += len(batch)

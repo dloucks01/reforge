@@ -9,7 +9,7 @@ import socket
 import threading
 
 from reforge.privhelper.helper import Helper
-from reforge.privhelper.ipc import HelperClient, Request, decode_line, encode
+from reforge.privhelper.ipc import HelperClient, decode_line, encode
 
 
 # ---- handle() covers every advertised op -----------------------------------

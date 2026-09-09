@@ -44,6 +44,6 @@ def test_perf_backend_open_raises_clear_message():
     be = AfXdpBackend(["eth0"])
     try:
         be.open()
-        assert False, "expected NotImplementedError"
+        raise AssertionError("expected NotImplementedError")
     except NotImplementedError as exc:
         assert "FAST-PATH" in str(exc)

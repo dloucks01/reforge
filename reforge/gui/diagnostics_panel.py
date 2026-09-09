@@ -7,7 +7,7 @@ Logs (tail + diagnostic-bundle export), and the offline Knowledge base.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (

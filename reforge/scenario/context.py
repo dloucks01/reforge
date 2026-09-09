@@ -8,7 +8,7 @@ the scenario started (stopped on teardown).
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from reforge.recon.assets import AssetInventory
 

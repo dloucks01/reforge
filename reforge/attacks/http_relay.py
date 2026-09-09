@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import socket
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 from reforge.attacks import http
 from reforge.core.httpframer import HttpFramer

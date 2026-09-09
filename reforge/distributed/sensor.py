@@ -6,7 +6,7 @@ observe(pkt) extracts credentials and host/OS/service facts and emits them.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from reforge.attacks.creds import CredentialExtractor
 from reforge.distributed.protocol import Message

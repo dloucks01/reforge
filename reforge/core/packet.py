@@ -30,7 +30,7 @@ class Packet:
     modified: bool = False
 
     @classmethod
-    def from_bytes(cls, data: bytes, ingress: str = "", link: str = "ether") -> "Packet":
+    def from_bytes(cls, data: bytes, ingress: str = "", link: str = "ether") -> Packet:
         return cls(raw=bytes(data), ingress=ingress, link=link)
 
     def _base_class(self):

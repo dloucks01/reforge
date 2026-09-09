@@ -10,7 +10,7 @@ from scapy.layers.l2 import Ether
 
 from reforge.fuzzing import monitor as mon
 from reforge.fuzzing.campaign import FuzzCampaign, load_findings
-from reforge.fuzzing.minimize import ddmin, still_anomalous
+from reforge.fuzzing.minimize import ddmin
 
 
 def _seed():

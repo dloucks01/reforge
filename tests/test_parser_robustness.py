@@ -52,7 +52,7 @@ def test_parsers_never_raise_on_dissectable_fuzz():
             b[rng.randrange(len(b))] = rng.randrange(256)
         try:
             pkts.append(Ether(bytes(b)))
-        except Exception:  # noqa: BLE001, S110 - fuzz corpus
+        except Exception:
             pass
 
     ce, inv = CredentialExtractor(), AssetInventory()
@@ -77,7 +77,7 @@ def test_dhcp_parse_request_never_raises_on_fuzz():
             b[rng.randrange(len(b))] = rng.randrange(256)
         try:
             pkts.append(Ether(bytes(b)))
-        except Exception:  # noqa: BLE001, S110 - fuzz corpus
+        except Exception:
             pass
     for p in pkts:
         dhcp.parse_request(p)            # must return (mac,xid,type) or None, never raise
@@ -112,7 +112,7 @@ def test_scapy_tree_rendering_never_raises_on_fuzz():
             b[rng.randrange(len(b))] = rng.randrange(256)
         try:
             pkts.append(Ether(bytes(b)))
-        except Exception:  # noqa: BLE001, S110 - fuzz corpus
+        except Exception:
             pass
     for p in pkts:
         scapy_tree.summarize(p, index=0, ts=0.0)

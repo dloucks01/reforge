@@ -33,10 +33,7 @@ def _dissect(data: bytes, link: str = "ether"):
     from scapy.layers.inet6 import IPv6
     from scapy.layers.l2 import Ether
 
-    if link == "ip":
-        base = IPv6 if (data and (data[0] >> 4) == 6) else IP
-    else:
-        base = Ether
+    base = (IPv6 if (data and (data[0] >> 4) == 6) else IP) if link == "ip" else Ether
     return base(data)
 
 

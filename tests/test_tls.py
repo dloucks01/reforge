@@ -27,7 +27,7 @@ def test_ca_mints_leaf_chaining_to_ca():
     from cryptography.x509.oid import NameOID
 
     ca = DynamicCA()
-    cert_pem, key_pem = ca.cert_for("secure.example.com")
+    cert_pem, _key_pem = ca.cert_for("secure.example.com")
     cert = x509.load_pem_x509_certificate(cert_pem)
     assert cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value == "secure.example.com"
     san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
@@ -175,7 +175,7 @@ def test_tls_interception_rewrites_large_https_body():
         while True:
             try:
                 chunk = tls.recv(65536)
-            except socket.timeout:
+            except TimeoutError:
                 break
             if not chunk:
                 break

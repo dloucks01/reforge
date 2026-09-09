@@ -118,6 +118,7 @@ def test_ra_flood_builds_distinct_routers():
     import random as _r
 
     from scapy.layers.inet6 import ICMPv6ND_RA, ICMPv6NDOptPrefixInfo
+
     from reforge.attacks.ndp import ra_flood_packets
 
     pkts = ra_flood_packets(20, _r.Random(1))
@@ -178,6 +179,7 @@ def test_imap_tagged_login_captured():
 
 def test_imap_authenticate_login_base64():
     import base64
+
     from reforge.attacks.creds import CredentialExtractor
     ex = CredentialExtractor()
     # AUTHENTICATE LOGIN then base64 user, base64 pass (same flow)

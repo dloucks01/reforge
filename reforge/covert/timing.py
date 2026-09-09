@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 
 def encode_timing(bits: str, unit: float = 0.1) -> list[float]:
     """Map a bit string to inter-packet delays: 0 -> 1 unit, 1 -> 2 units."""
@@ -14,4 +16,4 @@ def decode_timing(delays: list[float], unit: float = 0.1, threshold: float = 1.5
 
 
 def delays_from_timestamps(timestamps: list[float]) -> list[float]:
-    return [b - a for a, b in zip(timestamps, timestamps[1:])]
+    return [b - a for a, b in pairwise(timestamps)]

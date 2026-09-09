@@ -8,8 +8,8 @@ faster backend is swapped in. Burst-oriented by design for high link speeds.
 from __future__ import annotations
 
 import abc
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 
 @dataclass
@@ -69,7 +69,7 @@ class CaptureBackend(abc.ABC):
     def close(self) -> None:
         """Release resources. Idempotent; safe to call after a crash."""
 
-    def __enter__(self) -> "CaptureBackend":
+    def __enter__(self) -> CaptureBackend:
         self.open()
         return self
 

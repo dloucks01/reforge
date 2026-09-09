@@ -8,8 +8,8 @@ dry-run; inspection steps (analyze_pcap, note, sleep) always run.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from reforge.scenario.context import ScenarioContext
 

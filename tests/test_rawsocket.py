@@ -25,7 +25,7 @@ def test_recommend_uses_raw_for_midrange():
 def test_needs_two_ifaces_error():
     try:
         RawSocketBackend([])
-        assert False, "expected ValueError"
+        raise AssertionError("expected ValueError")
     except ValueError:
         pass
 

@@ -32,3 +32,20 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
+# A curated, useful set. We deliberately do NOT enable blind-except / try-except-pass
+# lints (BLE001, S110/S112): fail-open — "a hostile packet must never kill the loop"
+# — is an intentional, pervasive design choice in an inline tool.
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "C4", "SIM", "RET", "RUF"]
+ignore = [
+    "E702",    # one-liner `a; b` statements are the house style (esp. GUI layout)
+    "SIM105",  # explicit try/except/pass reads clearer with our inline comments
+    "RUF001",  # em-dashes / arrows in UI + doc strings are intentional
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# tests assert on broad exceptions on purpose (e.g. "decrypt of a tampered blob fails")
+"tests/*" = ["B017"]
