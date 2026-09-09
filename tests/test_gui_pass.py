@@ -51,11 +51,13 @@ def test_start_inline_uses_helper_when_available(app, monkeypatch):
     monkeypatch.setattr("reforge.capture.nfqueue.NfqueueRunner", _FakeRunner)
 
     status = win._start_inline("eth0", ["10.0.0.5"])
+    win._inline_flush()                                 # privileged work runs off-thread
     assert "inline via NFQUEUE" in status
     assert ("install", 1, ["10.0.0.5"]) in fake.calls   # one IPC batch, no subprocess
     assert win._nfq_via_helper is True
 
     win._stop_inline()
+    win._inline_flush()
     assert ("remove",) in fake.calls                    # torn down via the helper too
     assert win._nfq_via_helper is False
 
@@ -69,10 +71,12 @@ def test_start_inline_falls_back_to_subprocess_without_helper(app, monkeypatch):
                         lambda cmd, **k: ran.append(cmd) or None)
 
     win._start_inline("eth0", ["10.0.0.5"])
+    win._inline_flush()
     assert win._nfq_via_helper is False
     # applied the nft diversion rules directly (preflight iptables call aside)
     assert any(c[:5] == ["nft", "add", "table", "inet", "reforge_q"] for c in ran)
     win._stop_inline()                                  # removes via subprocess, no error
+    win._inline_flush()
 
 
 # ---- §3.12: drain throttles the heavy per-tick refreshes -------------------
@@ -164,3 +168,65 @@ def test_status_pill_omits_packet_count(app):
     win._refresh_status_pill()
     text = win.status_pill.text()
     assert "read-only" in text and "pkts" not in text and "5" not in text
+
+
+# ---- follow-up 1: inline privileged work runs off-thread, in order ----------
+def test_inline_executor_runs_ops_in_submission_order(app):
+    win = _win(app)
+    order = []
+    win._inline_submit(lambda: order.append("a"))
+    win._inline_submit(lambda: order.append("b"))
+    win._inline_submit(lambda: order.append("c"))
+    win._inline_flush()
+    assert order == ["a", "b", "c"]          # FIFO: teardown before a following start
+
+
+def test_start_inline_returns_before_privileged_work_runs(app, monkeypatch):
+    import threading
+    win = _win(app)
+    gate = threading.Event()
+    fake = _FakeHelper()
+    orig = fake.queue_install
+    fake.queue_install = lambda *a, **k: (gate.wait(2.0), orig(*a, **k))
+    monkeypatch.setattr(win, "_helper", lambda: fake)
+    monkeypatch.setattr("reforge.capture.nfqueue.NfqueueRunner", _FakeRunner)
+
+    win._start_inline("eth0", ["10.0.0.5"])  # must not block on the gated install
+    assert fake.calls == []                  # privileged work still pending on the worker
+    gate.set()
+    win._inline_flush()
+    assert ("install", 1, ["10.0.0.5"]) in fake.calls
+
+
+# ---- follow-up 2: dry-run is chunked, doesn't block on a big capture --------
+def test_dry_run_chunks_and_completes(app, monkeypatch):
+    from scapy.layers.inet import IP, TCP
+    from scapy.layers.l2 import Ether
+
+    from reforge.capture.base import Frame
+    from reforge.rules.actions import SetField
+    from reforge.rules.base import Rule
+    from reforge.rules.engine import RuleEngine
+    from reforge.rules.filter import parse_filter
+
+    win = _win(app)
+    win._DRY_RUN_CHUNK = 3                   # force multiple slices over 10 packets
+    for i in range(10):
+        dport = 80 if i % 2 == 0 else 22
+        win.packets.append((float(i), Frame(data=bytes(Ether() / IP() / TCP(dport=dport)))))
+
+    engine = RuleEngine([Rule("r", parse_filter("TCP.dport == 80"), [SetField("IP", "ttl", 5)])])
+    monkeypatch.setattr(win.rules_panel, "specs", ["r"], raising=False)
+    monkeypatch.setattr(win.rules_panel, "build_engine", lambda dry_run=True: engine)
+    monkeypatch.setattr(win.rules_panel, "refresh", lambda hits: None)
+
+    # drive the chunk function directly (no QTimer / event loop), so the test
+    # leaves no pending timers pinning the window
+    win._dry_run = {"i": 0, "matched": [], "packets": list(win.packets), "engine": engine}
+    steps = 0
+    while not win._dry_run_chunk_once():
+        steps += 1
+    win._dry_run_finish()
+    assert steps >= 3                        # 10 packets / chunk 3 -> multiple slices
+    assert win._dry_run is None
+    assert "5 of 10 packets matched" in win.statusBar().currentMessage()
