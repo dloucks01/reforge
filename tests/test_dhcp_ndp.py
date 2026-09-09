@@ -79,3 +79,32 @@ def test_rogue_ra_advertises_prefix_and_us():
     assert ra.haslayer(ICMPv6ND_RA) and int(ra[ICMPv6ND_RA].routerlifetime) > 0
     assert ra[ICMPv6NDOptSrcLLAddr].lladdr == "ca:fe:ca:fe:00:01"
     assert ra[ICMPv6NDOptPrefixInfo].prefix == "2001:db8:dead::"
+
+
+def test_rogue_dhcp_offer_and_ack_use_the_same_ip():
+    """DORA regression: the OFFER and the REQUEST's ACK must carry the same
+    yiaddr for a client, or the handshake never completes."""
+    import scapy.sendrecv as SR
+    from scapy.layers.dhcp import BOOTP, DHCP
+    from scapy.layers.l2 import Ether
+
+    from reforge.attacks import dhcp as D
+
+    sent = []
+    orig = SR.sendp
+    SR.sendp = lambda p, **k: sent.append(p)
+    try:
+        rogue = D.RogueDhcp("lo", "10.0.0.1", gateway="10.0.0.1", dns="10.0.0.1",
+                            pool_base="10.0.0.", pool_start=200)
+        mac = "02:11:22:33:44:55"
+        rogue._on(Ether(bytes(D.build_discover(mac, xid=0x99))))
+        req = Ether(bytes(D.build_discover(mac, xid=0x99)))
+        for i, o in enumerate(req[DHCP].options):
+            if isinstance(o, tuple) and o[0] == "message-type":
+                req[DHCP].options[i] = ("message-type", 3)
+        rogue._on(Ether(bytes(req)))
+    finally:
+        SR.sendp = orig
+    yiaddrs = [p[BOOTP].yiaddr for p in sent if p.haslayer(BOOTP)]
+    assert len(yiaddrs) == 2 and yiaddrs[0] == yiaddrs[1] == "10.0.0.200"
+    assert rogue.leased == 1

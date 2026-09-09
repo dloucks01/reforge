@@ -116,8 +116,19 @@ class RogueDhcp:  # pragma: no cover (needs root)
         self.dns = dns
         self.pool_base = pool_base
         self._next = pool_start
+        self._leases: dict[str, str] = {}   # mac -> offered ip (stable across DORA)
         self._sniffer = None
         self.leased = 0
+
+    def _lease_for(self, mac: str) -> str:
+        """The IP this client is offered/acked — one per MAC, so the OFFER and the
+        subsequent REQUEST's ACK carry the same address (or the client rejects it)."""
+        ip = self._leases.get(mac)
+        if ip is None:
+            ip = f"{self.pool_base}{self._next}"
+            self._next += 1
+            self._leases[mac] = ip
+        return ip
 
     def _on(self, pkt):
         from scapy.sendrecv import sendp
@@ -129,7 +140,7 @@ class RogueDhcp:  # pragma: no cover (needs root)
         if not parsed:
             return
         mac, xid, mtype = parsed
-        ip = f"{self.pool_base}{self._next}"; self._next += 1
+        ip = self._lease_for(mac)
         if mtype == "discover":
             sendp(build_offer(mac, xid, ip, self.server_ip, gateway=self.gateway, dns=self.dns),
                   iface=self.iface, verbose=False)
