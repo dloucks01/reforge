@@ -61,3 +61,26 @@
 
 `userspace_bridge` (primary, full L2–L7) · `nfqueue` (gateway) · `bridged_nfqueue`
 (transparent, kernel quirks) · `arp` (on-path) · `passive` (read-only). See PLAN.md §2.
+
+## GUI shell
+
+The interface (`reforge/gui/`) is a re-usable set of self-contained panel widgets hung on
+one shell:
+
+- **Session bar** (`main_window._build_session_bar`) — the session controls: **Mode**
+  (`Capture` = observe only / `Inline` = transparent bridge in the path), interface(s),
+  BPF, **Start/Stop**, one **self-labeling arm toggle** (`Pass-through ↔ ● Modifying the
+  wire`, driven by `act_arm`), and an always-visible **status pill**
+  (`_refresh_status_pill`) that states in plain words what the session is doing. Rarely
+  touched controls (Revert, seq-fix/checksum — both automatic now, Doctor, Vault, report)
+  live in the overflow menu.
+- **Nav rail** (`navrail.py`) — six workspaces: Live, Recon, Craft, Attack, Automate,
+  System. Panes can split side-by-side and detach into their own window (`panes.py`).
+- **Live workspace** — the capture→hold→modify→send loop: the packet stream / flows over
+  the **Intercept** editor (Original read-only beside an editable Modified copy; one
+  **Forward** and **Drop**) with **Rules** alongside (the automated sibling of the manual
+  edit). Advanced hold knobs are disclosed on demand.
+
+The core loop's correctness aids — inline preflight, auto-armed seq/ack fix-up, live
+confirmation counters, engine-choice guidance, message-relay routing — are described in
+[`CAPABILITY-AUDIT.md`](CAPABILITY-AUDIT.md).

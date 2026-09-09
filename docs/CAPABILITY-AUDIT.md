@@ -43,6 +43,22 @@ kernel (`sudo REFORGE_LIVE=1 pytest tests/test_live_guidance.py`):
 Suite: 604 offline / 26 skipped; the 3 guidance live tests pass with clean
 namespace + nft teardown.
 
+## Follow-up: core-loop clarity pass
+
+After the roadmap, a new-user review of the capture→hold→modify→send loop drove a
+subtractive GUI pass (fewer controls, plainer language, state you can read off the
+screen):
+
+- Mode renamed `Passive/Bridge` → **Capture/Inline** (kept visible — it decides whether
+  editing does anything).
+- The `Arm`/`Kill` jargon became **one self-labeling toggle** (`Pass-through ↔ ● Modifying
+  the wire`, hot when live) plus an always-visible **status pill**; Seq-fix/Checksum (both
+  automatic) retired to an Advanced menu, Kill → **Revert to pass-through**.
+- The intercept panel's tuning knobs (hold limit / auto-release / overflow / search)
+  collapsed behind **Advanced ▾**; five action buttons cut to **Forward** (sends the edit
+  if you made one, else unchanged — no separate Apply step) and **Drop**, with *Apply to
+  all matching* as a de-emphasized secondary.
+
 ## Updating the page
 
 The page is a published Claude artifact, not tracked HTML. To revise it, edit and
