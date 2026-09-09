@@ -103,7 +103,7 @@ class InterceptPanel(QWidget):
         fbar.setStretchFactor(self.filter_edit, 1)
         root.addLayout(fbar)
 
-        # --- compact status + limits + search (one row) ---------------------
+        # --- status line: what's happening + held count + Advanced toggle ---
         obar = QHBoxLayout(); obar.setSpacing(6)
         self.filter_status = QLabel("Intercept off \u2014 all traffic passes through.")
         self.filter_status.setStyleSheet("color: palette(mid);")
@@ -112,33 +112,47 @@ class InterceptPanel(QWidget):
         self.header = QLabel("held: 0")
         self.header.setStyleSheet("font-weight: 700;")
         obar.addWidget(self.header)
-        obar.addWidget(self._dim("hold"))
+        self.adv_toggle = QPushButton("Advanced \u25be")
+        self.adv_toggle.setCheckable(True)
+        self.adv_toggle.setMaximumWidth(104)
+        self.adv_toggle.setToolTip("Hold limit, auto-release timeout, overflow policy, "
+                                   "and a held-list search \u2014 sensible defaults otherwise")
+        self.adv_toggle.toggled.connect(self._toggle_advanced)
+        obar.addWidget(self.adv_toggle)
+        root.addLayout(obar)
+
+        # --- advanced knobs: hidden until asked for (sensible defaults hold) --
+        self.adv_row = QWidget()
+        adv = QHBoxLayout(self.adv_row); adv.setContentsMargins(0, 0, 0, 0); adv.setSpacing(6)
+        adv.addWidget(self._dim("hold"))
         self.limit_spin = QSpinBox(); self.limit_spin.setRange(0, 100000)
         self.limit_spin.setValue(20); self.limit_spin.setSpecialValueText("\u221e")
         self.limit_spin.setMaximumWidth(62)
         self.limit_spin.setToolTip("Max packets held at once (0 = unlimited). "
                                    "Extra matches auto-resolve instead of piling up.")
         self.limit_spin.valueChanged.connect(self._push_queue_config)
-        obar.addWidget(self.limit_spin)
-        obar.addWidget(self._dim("release"))
+        adv.addWidget(self.limit_spin)
+        adv.addWidget(self._dim("release"))
         self.autorel_spin = QSpinBox(); self.autorel_spin.setRange(0, 3600)
         self.autorel_spin.setSuffix("s"); self.autorel_spin.setValue(0)
         self.autorel_spin.setSpecialValueText("off"); self.autorel_spin.setMaximumWidth(58)
         self.autorel_spin.setToolTip("Auto-resolve a held packet after N seconds so the "
                                      "wire never stalls (0 = off).")
         self.autorel_spin.valueChanged.connect(self._push_queue_config)
-        obar.addWidget(self.autorel_spin)
+        adv.addWidget(self.autorel_spin)
         self.overflow_combo = QComboBox(); self.overflow_combo.addItems(["forward", "drop"])
         self.overflow_combo.setMaximumWidth(84)
         self.overflow_combo.setToolTip("What to do when the hold limit is reached")
         self.overflow_combo.currentTextChanged.connect(self._push_queue_config)
-        obar.addWidget(self.overflow_combo)
-        obar.addWidget(self._dim("search"))
+        adv.addWidget(self.overflow_combo)
+        adv.addWidget(self._dim("search"))
         self.search_edit = QLineEdit(); self.search_edit.setPlaceholderText("held list\u2026")
         self.search_edit.setMaximumWidth(150)
         self.search_edit.textChanged.connect(self._apply_search)
-        obar.addWidget(self.search_edit)
-        root.addLayout(obar)
+        adv.addWidget(self.search_edit)
+        adv.addStretch(1)
+        self.adv_row.setVisible(False)
+        root.addWidget(self.adv_row)
 
         # active 'Apply to all' transforms (persistent rewrites) — shown only when present
         self.xform_row = QWidget()
@@ -247,24 +261,24 @@ class InterceptPanel(QWidget):
         elayout.addWidget(body, 1)
 
         buttons = QHBoxLayout()
-        self.btn_apply = QPushButton("Apply")
-        self.btn_apply.setToolTip("Apply the raw edit to the working bytes")
-        self.btn_all = QPushButton("Apply to all")
-        self.btn_all.setToolTip("Turn this edit into a persistent transform applied to "
-                                "every matching packet, including resends")
-        self.btn_fwd = QPushButton("Forward")
-        self.btn_mod = QPushButton("Forward modified")
-        self.btn_drop = QPushButton("Drop")
-        self.btn_apply.clicked.connect(self._apply_edit)
+        # secondary (left): promote this edit to an auto-rule for all matching packets
+        self.btn_all = QPushButton("Apply to all matching…")
+        self.btn_all.setToolTip("Turn this edit into a persistent rule applied to every "
+                                "matching packet (including resends), instead of just this one")
         self.btn_all.clicked.connect(self._apply_to_all)
-        self.btn_fwd.clicked.connect(lambda: self._resolve("forward"))
-        self.btn_mod.clicked.connect(lambda: self._resolve("modify"))
+        # primary (right): one Forward that sends what's in the Modified pane —
+        # edited if you changed it, unchanged otherwise. No separate Apply step.
+        self.btn_fwd = QPushButton("Forward")
+        self.btn_fwd.setObjectName("goBtn")
+        self.btn_fwd.setToolTip("Send this packet — with your edits if you made any, "
+                                "otherwise unchanged")
+        self.btn_drop = QPushButton("Drop")
+        self.btn_drop.setToolTip("Discard this packet — it is not sent")
+        self.btn_fwd.clicked.connect(self._forward)
         self.btn_drop.clicked.connect(lambda: self._resolve("drop"))
-        buttons.addWidget(self.btn_apply)
-        buttons.addStretch(1)
         buttons.addWidget(self.btn_all)
+        buttons.addStretch(1)
         buttons.addWidget(self.btn_fwd)
-        buttons.addWidget(self.btn_mod)
         buttons.addWidget(self.btn_drop)
         self.result_label = QLabel("")
         self.result_label.setStyleSheet("font-weight: 700;")
@@ -764,8 +778,21 @@ class InterceptPanel(QWidget):
         self.refresh_pending()
 
     def _set_buttons_enabled(self, on: bool) -> None:
-        for b in (self.btn_apply, self.btn_all, self.btn_fwd, self.btn_mod, self.btn_drop):
+        for b in (self.btn_all, self.btn_fwd, self.btn_drop):
             b.setEnabled(on)
+
+    def _toggle_advanced(self, on: bool) -> None:
+        self.adv_row.setVisible(on)
+        self.adv_toggle.setText("Advanced ▴" if on else "Advanced ▾")
+
+    def _forward(self) -> None:
+        """Send the held packet. If the Modified pane differs from the original,
+        send the edited bytes (checksums recomputed); otherwise forward unchanged.
+        This folds the old separate 'Apply' + 'Forward modified' into one action."""
+        if self.queue is None or self._current_id is None:
+            return
+        self._sync_from_editor()                # capture the latest hex/ascii/field edit
+        self._resolve("modify" if self._work != self._orig_bytes else "forward")
 
     # ---- volume safeguards / promote ---------------------------------------
     def queue_config(self) -> tuple[int, float, str]:

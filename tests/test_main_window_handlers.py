@@ -32,19 +32,19 @@ def _frame(load=b"user=admin"):
 # ---- mode / bridge guards -------------------------------------------------
 def test_mode_change_and_bridge_ifaces(app):
     win = _win(app)
-    # Live mode: bridge ifaces are irrelevant
-    win.mode_combo.setCurrentText("Live")
-    win._on_mode_changed("Live")
+    # Capture mode: inline (bridge) ifaces are irrelevant
+    win.mode_combo.setCurrentText("Capture")
+    win._on_mode_changed("Capture")
     assert win._bridge_ifaces() == []
-    # Bridge mode surfaces the peer selector and reports both interfaces
-    win.mode_combo.setCurrentText("Bridge")
-    win._on_mode_changed("Bridge")
+    # Inline mode surfaces the peer selector and reports both interfaces
+    win.mode_combo.setCurrentText("Inline")
+    win._on_mode_changed("Inline")
     assert win.peer_label.isVisible() or win.peer_combo.isVisible() or True
 
 
 def test_start_bridge_requires_two_distinct_ifaces(app):
     win = _win(app)
-    win.mode_combo.setCurrentText("Bridge")
+    win.mode_combo.setCurrentText("Inline")
     # force both ports to the same interface -> the "two different" guard trips
     win.peer_combo.setCurrentText(win.iface_combo.currentText())
     win.start_bridge()
@@ -266,13 +266,13 @@ def test_intercept_length_change_warns(app):
 def test_mode_change_to_bridge_shows_engine_guidance(app, monkeypatch):
     import reforge.gui.main_window as MW
     win = _win(app)
-    # two NICs present -> Bridge is affirmed as the clean transparent tap
+    # two NICs present -> Inline (bridge) affirmed as the clean transparent tap
     monkeypatch.setattr(MW, "list_interfaces", lambda: ["eth0", "eth1"])
-    win._on_mode_changed("Bridge")
-    assert "Bridge engine" in win.statusBar().currentMessage()
-    # only one NIC -> warn Bridge needs two and point at NFQUEUE + MITM
+    win._on_mode_changed("Inline")
+    assert "Inline (bridge)" in win.statusBar().currentMessage()
+    # only one NIC -> warn it needs two and point at NFQUEUE + MITM
     monkeypatch.setattr(MW, "list_interfaces", lambda: ["eth0"])
-    win._on_mode_changed("Bridge")
+    win._on_mode_changed("Inline")
     msg = win.statusBar().currentMessage()
     assert "two interfaces" in msg and "MITM" in msg
     assert win._usable_iface_count() == 1
@@ -312,3 +312,24 @@ def test_inline_warnings_combines_preflight_and_proxy(app, monkeypatch):
     assert win._inline_warnings() == "PRE   PROXY"
     monkeypatch.setattr(win, "_message_proxy_warning", lambda: "")
     assert win._inline_warnings() == "PRE"                    # empties dropped
+
+
+def test_status_pill_reflects_session_state(app):
+    from reforge.core.bridge import UserspaceBridge
+    win = _win(app)
+    assert win.status_pill.property("state") == "stopped"
+    win.service = UserspaceBridge("a", "b", armed=False)
+    win._refresh_status_pill()
+    assert win.status_pill.property("state") == "passthrough"
+    win.service.armed = True
+    win._on_arm_toggled(True)
+    assert win.status_pill.property("state") == "modifying"
+    assert "Modifying" in win.act_arm.text() and win.arm_btn.property("armed") == "yes"
+    win.service = None
+
+
+def test_seqfix_and_csum_actions_survive_off_the_bar(app):
+    # retired from the session bar but still present as state for auto-arm / start
+    win = _win(app)
+    assert hasattr(win, "act_seqfix") and hasattr(win, "act_csum")
+    assert hasattr(win, "act_kill")                    # now the overflow 'Revert'

@@ -180,7 +180,10 @@ class MainWindow(QMainWindow):
 
         # session-control widgets (kept as attributes for handlers/settings/tests)
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Passive", "Bridge"])
+        self.mode_combo.addItems(["Capture", "Inline"])
+        self.mode_combo.setToolTip("Capture = observe only. Inline = sit in the path "
+                                   "(transparent bridge) so held packets can be edited "
+                                   "and forwarded.")
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
         self.iface_combo = QComboBox()
         self.iface_combo.addItems(list_interfaces() or ["<none>"])
@@ -217,9 +220,11 @@ class MainWindow(QMainWindow):
         self.act_stop = act("Stop", self.stop_capture, shortcut="Shift+F5",
                             tip="Stop the running service (Shift+F5)")
         self.act_stop.setEnabled(False)
-        self.act_arm = act("Arm", self._on_arm_toggled, checkable=True)
-        self.act_kill = act("Kill", self.kill_switch,
-                            tip="Revert to pass-through and release held packets")
+        self.act_arm = act("Pass-through", self._on_arm_toggled, checkable=True,
+                           tip="Off = traffic passes through untouched. On = your edits "
+                               "and rules actually change the wire.")
+        self.act_kill = act("Revert to pass-through", self.kill_switch,
+                            tip="Instantly stop modifying and release held packets")
         self.act_seqfix = act("Seq-fix", self._on_seqfix_toggled, checkable=True,
                               tip="Keep TCP flows in sync after length-changing edits")
         self.act_csum = act("Cksum", self._on_csum_toggled, checkable=True,
@@ -356,17 +361,32 @@ class MainWindow(QMainWindow):
             row.addWidget(w)
         row.addWidget(tbtn(self.act_start, "goBtn"))
         row.addWidget(tbtn(self.act_stop))
+
+        # Inline-only: one self-labeling toggle for whether edits reach the wire.
+        # Its text always states the CURRENT reality (see _on_arm_toggled).
         row.addWidget(self._vsep())
-        for a in (self.act_arm, self.act_kill, self.act_seqfix, self.act_csum):
-            row.addWidget(tbtn(a))
+        self.arm_btn = tbtn(self.act_arm, "armBtn")
+        row.addWidget(self.arm_btn)
+
+        row.addStretch(1)
+        # always-visible plain-language status of what the tool is doing right now
+        self.status_pill = QLabel()
+        self.status_pill.setObjectName("statusPill")
+        row.addWidget(self.status_pill)
         row.addStretch(1)
 
         overflow = QToolButton()
         overflow.setText("\u22ef")
         overflow.setPopupMode(QToolButton.InstantPopup)
         menu = QMenu(overflow)
+        menu.addAction(self.act_kill)                    # emergency revert
+        menu.addSeparator()
         for a in (self.act_open, self.act_demo, self.act_export, self.act_clear):
             menu.addAction(a)
+        menu.addSeparator()
+        adv = menu.addMenu("Advanced")                   # auto-managed; rarely touched
+        adv.addAction(self.act_seqfix)
+        adv.addAction(self.act_csum)
         menu.addSeparator()
         for a in (self.act_doctor, self.act_plugins, self.act_vault):
             menu.addAction(a)
@@ -377,6 +397,9 @@ class MainWindow(QMainWindow):
         row.addWidget(overflow)
         row.addWidget(tbtn(self.act_guide))
         row.addWidget(tbtn(self.act_theme))
+
+        self._on_mode_changed(self.mode_combo.currentText())   # set arm-btn visibility
+        self._refresh_status_pill()
         return bar
 
     def _vsep(self) -> QLabel:
@@ -530,7 +553,7 @@ class MainWindow(QMainWindow):
         if section_key:
             self.guide_panel.scroll_to(section_key)
     def _bridge_ifaces(self) -> list[str]:
-        if self.mode_combo.currentText() != "Bridge":
+        if self.mode_combo.currentText() != "Inline":
             return []
         return [i for i in (self.iface_combo.currentText(), self.peer_combo.currentText())
                 if i and i != "<none>"]
@@ -556,23 +579,26 @@ class MainWindow(QMainWindow):
                                        check_nfqueue_ready().ok, mitm_active)
 
     def _on_mode_changed(self, mode: str) -> None:
-        bridge = mode == "Bridge"
-        self.peer_label.setVisible(bridge)
-        self.peer_combo.setVisible(bridge)
-        if not bridge:
+        inline = mode == "Inline"
+        self.peer_label.setVisible(inline)
+        self.peer_combo.setVisible(inline)
+        if hasattr(self, "arm_btn"):
+            self.arm_btn.setVisible(inline)          # nothing to arm when only observing
+        self._refresh_status_pill()
+        if not inline:
             return
         adv = self._engine_advice()
         if adv.engine == "bridge":
-            self.statusBar().showMessage("Bridge engine: " + adv.reason + ". " + adv.alternative)
+            self.statusBar().showMessage("Inline (bridge): " + adv.reason + ". " + adv.alternative)
         elif adv.engine == "nfqueue":       # recommender steered away — usually <2 NICs
             self.statusBar().showMessage(
-                "⚠ Bridge needs two interfaces — " + adv.reason +
+                "⚠ Inline (bridge) needs two interfaces — " + adv.reason +
                 " (Attacks → MITM + “Intercept & rewrite”).")
         else:
             self.statusBar().showMessage("⚠ " + adv.reason + " — " + adv.alternative)
 
     def on_start(self) -> None:
-        if self.mode_combo.currentText() == "Bridge":
+        if self.mode_combo.currentText() == "Inline":
             self.start_bridge()
         else:
             self.start_live()
@@ -655,6 +681,7 @@ class MainWindow(QMainWindow):
         self.timer.start()
         self.act_start.setEnabled(False)
         self.act_stop.setEnabled(True)
+        self._refresh_status_pill()
         self.statusBar().showMessage(f"Running — {label}")
 
     # ---- interactive intercept filter --------------------------------------
@@ -933,6 +960,7 @@ class MainWindow(QMainWindow):
             self.service = None
         self.act_start.setEnabled(True)
         self.act_stop.setEnabled(False)
+        self._refresh_status_pill()
         self.statusBar().showMessage(f"Stopped — {len(self.packets)} packets")
 
     def clear(self) -> None:
@@ -965,6 +993,7 @@ class MainWindow(QMainWindow):
         if self.intercept is not None:
             self.intercept.reap()               # auto-release timed-out holds
             self.intercept_panel.refresh_pending()
+            self._refresh_status_pill()         # keep the held count live
         self.diag_panel.refresh_health()
         self.recon_panel.refresh()
         self._refresh_flows()
@@ -997,11 +1026,44 @@ class MainWindow(QMainWindow):
 
     # ---- arm / kill-switch --------------------------------------------------
     def _on_arm_toggled(self, armed: bool) -> None:
-        self.act_arm.setText("ARMED" if armed else "Arm")
+        # the toggle's own label always states the current reality, so there is no
+        # separate "armed?" fact to carry in your head
+        self.act_arm.setText("● Modifying the wire" if armed else "Pass-through")
+        if hasattr(self, "arm_btn"):
+            self.arm_btn.setProperty("armed", "yes" if armed else "no")
+            self.arm_btn.style().unpolish(self.arm_btn)
+            self.arm_btn.style().polish(self.arm_btn)
         if self.service is not None and hasattr(self.service, "armed"):
             self.service.armed = armed
-            self.statusBar().showMessage("ARMED — rules active" if armed
-                                         else "Safe — pass-through")
+            self.statusBar().showMessage("Now modifying the wire — edits and rules take effect"
+                                         if armed else "Pass-through — traffic flows untouched")
+        self._refresh_status_pill()
+
+    def _refresh_status_pill(self) -> None:
+        """One always-visible line stating exactly what the tool is doing."""
+        if not hasattr(self, "status_pill"):
+            return
+        pill = self.status_pill
+        if self.service is None:
+            pill.setText("○ Stopped")
+            pill.setProperty("state", "stopped")
+        else:
+            inline = hasattr(self.service, "armed")
+            held = self.intercept.count() if self.intercept is not None else 0
+            if not inline:
+                pill.setText(f"● Capturing · {len(self.packets)} pkts · read-only")
+                pill.setProperty("state", "capturing")
+            else:
+                armed = bool(getattr(self.service, "armed", False))
+                tail = f" · {held} held" if held else ""
+                if armed:
+                    pill.setText("● Inline · forwarding + modifying" + tail)
+                    pill.setProperty("state", "modifying")
+                else:
+                    pill.setText("● Inline · forwarding, not modifying" + tail)
+                    pill.setProperty("state", "passthrough")
+        pill.style().unpolish(pill)
+        pill.style().polish(pill)
 
     def _on_seqfix_toggled(self, on: bool) -> None:
         if self.service is not None and hasattr(self.service, "set_seq_fixup"):

@@ -274,7 +274,7 @@ def test_bridge_start_keeps_intercept_and_engine(app, monkeypatch):
     w.iface_combo.clear(); w.iface_combo.addItems(["eth0", "eth1"])
     w.peer_combo.clear(); w.peer_combo.addItems(["eth0", "eth1"])
     w.iface_combo.setCurrentText("eth0"); w.peer_combo.setCurrentText("eth1")
-    w.mode_combo.setCurrentText("Bridge")
+    w.mode_combo.setCurrentText("Inline")
     w.start_bridge()
 
     assert w.intercept is not None                     # queue survives the start

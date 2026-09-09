@@ -198,3 +198,30 @@ def test_length_changing_edit_fires_callback(app):
     p.hex_edit.setPlainText(txt)
     p._resolve("modify")
     assert fired.get("delta") == len(b"MUCH-LONGER") - len(b"SHORT")   # +6
+
+
+# ---- new-user cleanups: advanced disclosure + one-button Forward -----------
+def test_advanced_knobs_hidden_until_toggled(app):
+    p = _panel(app)
+    # isHidden() tracks the explicit flag regardless of whether a parent is shown
+    assert p.adv_row.isHidden() is True                # knobs hidden at rest
+    p.adv_toggle.setChecked(True)
+    assert p.adv_row.isHidden() is False and "▴" in p.adv_toggle.text()
+    p.adv_toggle.setChecked(False)
+    assert p.adv_row.isHidden() is True and "▾" in p.adv_toggle.text()
+
+
+def test_forward_sends_unchanged_when_not_edited(app):
+    p, _q, out = _held(app, _frame(b"user=admin"))
+    p._forward()                                        # no edit -> forward original
+    assert out["v"] == _frame(b"user=admin")
+    assert "unchanged" in p.result_label.text().lower()
+
+
+def test_forward_sends_edited_bytes_after_an_edit(app):
+    p, _q, out = _held(app, _frame(b"user=admin"))
+    p.view_combo.setCurrentText("ASCII")
+    p.hex_edit.setPlainText(p.hex_edit.toPlainText().replace("admin", "guest"))
+    p._forward()                                        # edited -> sends modified
+    assert b"user=guest" in out["v"] and out["v"] != _frame(b"user=admin")
+    assert "MODIFIED" in p.result_label.text()

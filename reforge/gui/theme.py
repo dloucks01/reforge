@@ -257,6 +257,18 @@ QTabWidget::pane {{ border: 1px solid {p['BORDER']}; border-radius: 6px; top: -1
 #sessionBar QToolButton {{ padding: 4px 10px; }}
 #goBtn {{ background: {p['ACCENT']}; border-color: {p['ACCENT']}; color: #ffffff; }}
 #goBtn:hover {{ background: {p['ACCENT_HOVER']}; }}
+/* the self-labeling arm toggle: neutral when passing through, hot when modifying */
+#armBtn {{ padding: 4px 12px; }}
+#armBtn[armed="no"] {{ color: {p['TEXT_MUTED']}; }}
+#armBtn[armed="yes"] {{ background: {p['DANGER']}; border-color: {p['DANGER']};
+    color: #ffffff; font-weight: 700; }}
+/* always-visible plain-language status of what the session is doing */
+#statusPill {{ font-family: 'JetBrains Mono'; font-size: 11px; padding: 2px 10px;
+    border-radius: 9px; }}
+#statusPill[state="stopped"] {{ color: {p['TEXT_DIM']}; }}
+#statusPill[state="capturing"] {{ color: {p['ACCENT']}; }}
+#statusPill[state="passthrough"] {{ color: {p['TEXT_MUTED']}; }}
+#statusPill[state="modifying"] {{ color: {p['DANGER']}; font-weight: 700; }}
 
 #wsHeader {{ background: {p['BG_PANEL']}; border-bottom: 1px solid {p['BORDER']}; }}
 #wsBlurb {{ color: {p['TEXT_MUTED']}; font-size: 11px; }}
